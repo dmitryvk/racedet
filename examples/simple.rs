@@ -5,8 +5,9 @@ use tokio::join;
 
 #[tokio::main]
 async fn main() {
-    let res = run_with_schedule(foo()).await;
+    let (trace, res) = run_with_schedule(foo()).await;
     println!("{res:?}");
+    println!("{trace}");
 }
 
 async fn foo() {

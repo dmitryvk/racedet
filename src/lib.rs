@@ -1,32 +1,51 @@
-use std::{panic::AssertUnwindSafe, task::Poll};
+use std::num::NonZeroU64;
 
-use futures::pin_mut;
+use crate::{executor::TaskFuture, scheduler::Scheduler};
+mod executor;
+mod scheduler;
 
-use pin_project::pin_project;
-use tokio::task::yield_now;
+#[derive(Clone, Copy, Debug)]
+struct TaskId(NonZeroU64);
 
 pub async fn execution_point(name: &str) {
-    println!("{name}");
-    yield_now().await;
+    if let Some(scheduler) = Scheduler::current()
+        && let Some(task_id) = executor::current_task()
+    {
+        scheduler.on_reached_point(task_id, name).await;
+    }
 }
 
-pub async fn task<T>(name: &str, inner: impl Future<Output = T>) -> T {
-    println!("task {name}");
-    inner.await
+pub fn task<T>(name: &str, inner: impl Future<Output = T>) -> impl Future<Output = T> {
+    let scheduler = Scheduler::current();
+    let task_id = scheduler.as_deref().map(|s| {
+        let task_id = s.register_task(name);
+        println!("task {task_id:?} {name}");
+        task_id
+    });
+    async move {
+        if let Some(task_id) = task_id
+            && let Some(scheduler) = scheduler.as_deref()
+        {
+            scheduler.on_reached_point(task_id, "start").await;
+        }
+        let res = TaskFuture::new(inner, task_id).await;
+        if let Some(task_id) = task_id
+            && let Some(scheduler) = scheduler.as_deref()
+        {
+            scheduler.on_reached_point(task_id, "end").await;
+        }
+        res
+    }
 }
 
 pub async fn run_with_schedule<T, Fut>(inner: Fut) -> (Trace, RunResult<T>)
 where
     Fut: Future<Output = T> + Sized,
 {
-    let panic_fut = PanicFut { inner };
-    pin_mut!(panic_fut);
-    let res = panic_fut.await;
-    let trace = Trace { trace: Vec::new() };
-    match res {
-        Ok(res) => (trace, RunResult::Ok(res)),
-        Err(panic) => (trace, RunResult::Panic(panic)),
-    }
+    let scheduler = Scheduler::new();
+    let res = executor::run(scheduler.clone(), inner).await;
+    let trace = scheduler.get_trace();
+    (trace, res)
 }
 
 #[derive(Debug, Clone)]
@@ -40,43 +59,18 @@ pub struct Trace {
     pub trace: Vec<String>,
 }
 
+impl std::fmt::Display for Trace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, step) in self.trace.iter().enumerate() {
+            writeln!(f, "{i}. {step}")?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PanicInfo {
     pub message: String,
     pub location: String,
     pub backtrace: String,
-}
-
-#[pin_project]
-struct PanicFut<T> {
-    #[pin]
-    inner: T,
-}
-
-impl<T: Future> Future for PanicFut<T> {
-    type Output = Result<T::Output, PanicInfo>;
-
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        let this = self.project();
-        match std::panic::catch_unwind(AssertUnwindSafe(|| this.inner.poll(cx))) {
-            Ok(Poll::Pending) => Poll::Pending,
-            Ok(Poll::Ready(res)) => Poll::Ready(Ok(res)),
-            Err(panic) => {
-                let msg = if let Some(s) = panic.downcast_ref::<String>() {
-                    s.clone()
-                } else {
-                    "unknown panic".to_string()
-                };
-                let info = PanicInfo {
-                    message: msg,
-                    location: "".to_string(),
-                    backtrace: "".to_string(),
-                };
-                Poll::Ready(Err(info))
-            }
-        }
-    }
 }
