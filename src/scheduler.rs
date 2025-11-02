@@ -74,7 +74,10 @@ impl Scheduler {
             trace: inner
                 .trace
                 .iter()
-                .map(|(task_id, point)| format!("task {}: {point}", task_id.0))
+                .map(|(task_id, point)| {
+                    let task = inner.tasks.get(task_id.0.get() as usize - 1).unwrap();
+                    format!("task {} {}: {point}", task.id.0, task.name)
+                })
                 .collect(),
         }
     }
