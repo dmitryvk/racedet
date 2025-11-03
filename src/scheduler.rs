@@ -22,6 +22,7 @@ pub(crate) struct Scheduler {
 
 struct Inner {
     next_task_id: u64,
+    task_selector: TaskSelector,
     tasks: Vec<Task>,
     trace: Vec<(TaskId, String)>,
 }
@@ -50,11 +51,35 @@ enum TaskState {
     Finished,
 }
 
+pub(crate) enum TaskSelector {
+    Random(RandomTaskSelector),
+    RoundRobin(RoundRobinTaskSelector),
+}
+
+pub(crate) struct RandomTaskSelector;
+
+pub(crate) struct RoundRobinTaskSelector {
+    next: usize,
+}
+
+impl RoundRobinTaskSelector {
+    pub(crate) fn new() -> Self {
+        Self { next: 0 }
+    }
+}
+
+impl RandomTaskSelector {
+    pub(crate) fn new() -> Self {
+        Self
+    }
+}
+
 impl Scheduler {
-    pub(crate) fn new() -> Arc<Self> {
+    pub(crate) fn new(task_selector: TaskSelector) -> Arc<Self> {
         Arc::new(Scheduler {
             inner: Mutex::new(Inner {
                 next_task_id: 1,
+                task_selector,
                 tasks: Vec::new(),
                 trace: Vec::new(),
             }),
@@ -189,7 +214,9 @@ impl Scheduler {
                 .iter()
                 .any(|task| matches!(task.state, TaskState::Running));
             if !has_running {
-                if let Some(next_running) = self.choose_next_running(&inner.tasks) {
+                if let Some(next_running) =
+                    inner.task_selector.choose_next_running_task(&inner.tasks)
+                {
                     let task = inner.tasks.get_mut(next_running).unwrap();
                     task.prev_suspend_point =
                         match mem::replace(&mut task.state, TaskState::Running) {
@@ -238,5 +265,65 @@ pub(crate) struct CurrentSchedulerGuard {
 impl Drop for CurrentSchedulerGuard {
     fn drop(&mut self) {
         CURRENT_SCHEDULER.replace(self.old_value.take());
+    }
+}
+
+impl TaskSelector {
+    fn choose_next_running_task(&mut self, tasks: &[Task]) -> Option<usize> {
+        match self {
+            TaskSelector::Random(random_task_selector) => {
+                random_task_selector.choose_next_running_task(tasks)
+            }
+            TaskSelector::RoundRobin(round_robin_task_selector) => {
+                round_robin_task_selector.choose_next_running_task(tasks)
+            }
+        }
+    }
+}
+
+impl RandomTaskSelector {
+    fn choose_next_running_task(&mut self, tasks: &[Task]) -> Option<usize> {
+        let num_ready = tasks
+            .iter()
+            .filter(|task| {
+                matches!(
+                    task.state,
+                    TaskState::ReadyAtPoint { .. } | TaskState::ReadyAtStart
+                )
+            })
+            .count();
+        if num_ready == 0 {
+            return None;
+        }
+        let ord = rand::random_range(0..num_ready);
+        let idx = tasks
+            .iter()
+            .enumerate()
+            .filter(|(_, task)| {
+                matches!(
+                    task.state,
+                    TaskState::ReadyAtPoint { .. } | TaskState::ReadyAtStart
+                )
+            })
+            .nth(ord)
+            .unwrap()
+            .0;
+        Some(idx)
+    }
+}
+
+impl RoundRobinTaskSelector {
+    fn choose_next_running_task(&mut self, tasks: &[Task]) -> Option<usize> {
+        for _ in 0..tasks.len() {
+            let idx = self.next;
+            self.next = (self.next + 1) % tasks.len();
+            if matches!(
+                tasks[self.next].state,
+                TaskState::ReadyAtPoint { .. } | TaskState::ReadyAtStart
+            ) {
+                return Some(idx);
+            }
+        }
+        None
     }
 }

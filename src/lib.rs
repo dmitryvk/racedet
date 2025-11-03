@@ -3,7 +3,10 @@ use std::{num::NonZeroU64, sync::Arc, task::Poll};
 use futures::FutureExt;
 use pin_project::pin_project;
 
-use crate::{executor::TaskFuture, scheduler::Scheduler};
+use crate::{
+    executor::TaskFuture,
+    scheduler::{RandomTaskSelector, Scheduler},
+};
 mod executor;
 mod scheduler;
 
@@ -76,7 +79,7 @@ pub async fn run_with_schedule<T, Fut>(inner: Fut) -> (Trace, RunResult<T>)
 where
     Fut: Future<Output = T> + Sized,
 {
-    let scheduler = Scheduler::new();
+    let scheduler = Scheduler::new(scheduler::TaskSelector::Random(RandomTaskSelector::new()));
     let res = RunAlong {
         main_fut: executor::run(scheduler.clone(), inner),
         aux_fut: scheduler.run_control_loop().fuse(),
