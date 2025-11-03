@@ -60,6 +60,14 @@ impl Scheduler {
         id
     }
 
+    pub(crate) fn on_task_started(&self, task_id: TaskId) {
+        println!("task {task_id:?} started");
+    }
+
+    pub(crate) fn on_task_finished(&self, task_id: TaskId) {
+        println!("task {task_id:?} finished");
+    }
+
     pub(crate) async fn on_reached_point(&self, task_id: TaskId, name: &str) {
         println!("reached point {task_id:?} {name}");
         let mut inner = self.inner.lock().unwrap();
@@ -80,6 +88,11 @@ impl Scheduler {
                 })
                 .collect(),
         }
+    }
+
+    pub(crate) async fn run_control_loop(&self) {
+        println!("run control loop started");
+        // todo
     }
 }
 
