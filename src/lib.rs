@@ -1,4 +1,4 @@
-use std::{num::NonZeroU64, task::Poll};
+use std::{num::NonZeroU64, sync::Arc, task::Poll};
 
 use futures::FutureExt;
 use pin_project::pin_project;
@@ -7,8 +7,27 @@ use crate::{executor::TaskFuture, scheduler::Scheduler};
 mod executor;
 mod scheduler;
 
+#[derive(Clone)]
+pub struct RegisteredTaskId(Option<(Arc<Scheduler>, TaskId)>);
+
 #[derive(Clone, Copy, Debug)]
 struct TaskId(NonZeroU64);
+
+impl RegisteredTaskId {
+    const INVALID: RegisteredTaskId = RegisteredTaskId(None);
+
+    fn into_parts(mut self) -> Option<(Arc<Scheduler>, TaskId)> {
+        self.0.take()
+    }
+}
+
+impl Drop for RegisteredTaskId {
+    fn drop(&mut self) {
+        if let Some((scheduler, task_id)) = self.0.take() {
+            scheduler.on_task_finished(task_id);
+        }
+    }
+}
 
 pub async fn execution_point(name: &str) {
     if let Some(scheduler) = Scheduler::current()
@@ -18,31 +37,36 @@ pub async fn execution_point(name: &str) {
     }
 }
 
-pub fn task<T>(name: &str, inner: impl Future<Output = T>) -> impl Future<Output = T> {
-    let scheduler = Scheduler::current();
-    let task_id = scheduler.as_deref().map(|s| {
-        let task_id = s.register_task(name);
-        println!("task {task_id:?} {name}");
-        task_id
-    });
-    async move {
-        let _guard;
-        if let Some(task_id) = task_id
-            && let Some(scheduler) = scheduler.as_deref()
-        {
-            scheduler.on_task_started(task_id);
-            _guard = TaskFinishedGuard { task_id, scheduler };
-        }
-        TaskFuture::new(inner, task_id).await
+pub fn register_task(name: &str) -> RegisteredTaskId {
+    if let Some(scheduler) = Scheduler::current() {
+        let task_id = scheduler.register_task(name);
+        RegisteredTaskId(Some((scheduler, task_id)))
+    } else {
+        RegisteredTaskId::INVALID
     }
 }
 
-struct TaskFinishedGuard<'a> {
-    task_id: TaskId,
-    scheduler: &'a Scheduler,
+pub async fn task<T>(task_id: RegisteredTaskId, inner: impl Future<Output = T>) -> T {
+    let _guard;
+    let task_id = if let Some((scheduler, task_id)) = task_id.into_parts() {
+        _guard = TaskFinishedGuard {
+            task_id,
+            scheduler: scheduler.clone(),
+        };
+        scheduler.on_task_started(task_id).await;
+        Some(task_id)
+    } else {
+        None
+    };
+    TaskFuture::new(inner, task_id).await
 }
 
-impl Drop for TaskFinishedGuard<'_> {
+struct TaskFinishedGuard {
+    task_id: TaskId,
+    scheduler: Arc<Scheduler>,
+}
+
+impl Drop for TaskFinishedGuard {
     fn drop(&mut self) {
         self.scheduler.on_task_finished(self.task_id);
     }

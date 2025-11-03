@@ -1,6 +1,6 @@
 use std::sync::{Arc, atomic::AtomicI64};
 
-use conc_checker::{execution_point, run_with_schedule, task};
+use conc_checker::{execution_point, register_task, run_with_schedule, task};
 use tokio::join;
 
 #[tokio::main]
@@ -12,7 +12,9 @@ async fn main() {
 
 async fn foo() {
     let var = Arc::new(AtomicI64::new(0));
-    join!(task("bar", bar(var.clone())), task("bar", bar(var.clone())));
+    let bar1 = register_task("bar");
+    let bar2 = register_task("bar");
+    join!(task(bar1, bar(var.clone())), task(bar2, bar(var.clone())));
     assert_eq!(2, var.load(std::sync::atomic::Ordering::Relaxed));
 }
 
