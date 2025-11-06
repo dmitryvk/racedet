@@ -53,20 +53,9 @@ enum TaskState {
 
 pub(crate) enum TaskSelector {
     Random(RandomTaskSelector),
-    RoundRobin(RoundRobinTaskSelector),
 }
 
 pub(crate) struct RandomTaskSelector;
-
-pub(crate) struct RoundRobinTaskSelector {
-    next: usize,
-}
-
-impl RoundRobinTaskSelector {
-    pub(crate) fn new() -> Self {
-        Self { next: 0 }
-    }
-}
 
 impl RandomTaskSelector {
     pub(crate) fn new() -> Self {
@@ -243,19 +232,6 @@ impl Scheduler {
             notified.await;
         }
     }
-
-    fn choose_next_running(&self, tasks: &[Task]) -> Option<usize> {
-        for (idx, task) in tasks.iter().enumerate() {
-            if matches!(
-                task.state,
-                TaskState::ReadyAtPoint { .. } | TaskState::ReadyAtStart
-            ) {
-                return Some(idx);
-            }
-        }
-
-        None
-    }
 }
 
 pub(crate) struct CurrentSchedulerGuard {
@@ -273,9 +249,6 @@ impl TaskSelector {
         match self {
             TaskSelector::Random(random_task_selector) => {
                 random_task_selector.choose_next_running_task(tasks)
-            }
-            TaskSelector::RoundRobin(round_robin_task_selector) => {
-                round_robin_task_selector.choose_next_running_task(tasks)
             }
         }
     }
@@ -309,21 +282,5 @@ impl RandomTaskSelector {
             .unwrap()
             .0;
         Some(idx)
-    }
-}
-
-impl RoundRobinTaskSelector {
-    fn choose_next_running_task(&mut self, tasks: &[Task]) -> Option<usize> {
-        for _ in 0..tasks.len() {
-            let idx = self.next;
-            self.next = (self.next + 1) % tasks.len();
-            if matches!(
-                tasks[self.next].state,
-                TaskState::ReadyAtPoint { .. } | TaskState::ReadyAtStart
-            ) {
-                return Some(idx);
-            }
-        }
-        None
     }
 }
