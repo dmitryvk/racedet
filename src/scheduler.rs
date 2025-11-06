@@ -3,7 +3,7 @@ use std::{
     mem,
     num::NonZeroU64,
     pin::pin,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 use itertools::Itertools;
@@ -88,8 +88,18 @@ impl Scheduler {
         })
     }
 
+    fn lock(&self) -> MutexGuard<'_, Inner> {
+        match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(err) => {
+                self.inner.clear_poison();
+                err.into_inner()
+            }
+        }
+    }
+
     pub(crate) fn register_task(&self, name: &str) -> TaskId {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock();
         let id = TaskId(NonZeroU64::new(inner.next_task_id).unwrap());
         println!("task {id:?} {name} registered");
         inner.next_task_id += 1;
@@ -108,14 +118,14 @@ impl Scheduler {
 
     pub(crate) async fn on_task_started(&self, task_id: TaskId) {
         println!("task {task_id:?} started");
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock();
         let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
         task.state = TaskState::WaitingForOtherPending;
         drop(inner);
         self.scheduler_notify.notify_waiters();
         loop {
             self.task_notify.notified().await;
-            let mut inner = self.inner.lock().unwrap();
+            let mut inner = self.lock();
             let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
             if matches!(task.state, TaskState::Running) {
                 println!("task {task_id:?} resumed from start");
@@ -126,7 +136,7 @@ impl Scheduler {
 
     pub(crate) fn on_task_finished(&self, task_id: TaskId) {
         println!("task {task_id:?} finished");
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock();
         let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
         task.state = TaskState::Finished;
         drop(inner);
@@ -135,8 +145,23 @@ impl Scheduler {
 
     pub(crate) async fn on_reached_point(&self, task_id: TaskId, name: &str) {
         println!("reached point {task_id:?} {name}");
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock();
         let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
+        match &task.state {
+            TaskState::Running => {}
+            TaskState::Pending
+            | TaskState::WaitingForOtherPending
+            | TaskState::ReadyAtStart
+            | TaskState::ReadyAtPoint { .. }
+            | TaskState::Finished => {
+                panic!(
+"task {} {} reached point {name}, but its state is not Running, but rather is {:?}.
+  This might mean that an internal task concurrency is happening (e.g., join or FuturesUnordered).
+  If this is the case, each spawned task must be wrapped with `task`",
+                    task.id.0, task.name, task.state
+                );
+            }
+        }
         task.state = TaskState::ReadyAtPoint {
             point: name.to_string(),
         };
@@ -144,7 +169,7 @@ impl Scheduler {
         self.scheduler_notify.notify_waiters();
         loop {
             self.task_notify.notified().await;
-            let mut inner = self.inner.lock().unwrap();
+            let mut inner = self.lock();
             let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
             if matches!(task.state, TaskState::Running) {
                 println!("task {task_id:?} resumed from {name}");
@@ -154,7 +179,7 @@ impl Scheduler {
     }
 
     pub(crate) fn get_trace(&self) -> Trace {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.lock();
         Trace {
             trace: inner
                 .trace
@@ -173,7 +198,7 @@ impl Scheduler {
             let mut notified = pin!(self.scheduler_notify.notified());
             notified.as_mut().enable();
 
-            let mut guard = self.inner.lock().unwrap();
+            let mut guard = self.lock();
             let inner = &mut *guard;
             println!(
                 "run control loop; tasks=[{}]",
