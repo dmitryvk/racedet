@@ -1,5 +1,6 @@
 use std::{
     cell::RefCell,
+    collections::HashSet,
     mem,
     num::NonZeroU64,
     pin::pin,
@@ -26,6 +27,7 @@ struct Inner {
     task_selector: TaskSelector,
     tasks: Vec<Task>,
     task_start_barriers: Vec<TaskStartBarrier>,
+    locks_held: HashSet<String>,
     trace: Vec<(TaskId, String)>,
 }
 
@@ -34,6 +36,7 @@ pub(crate) struct Task {
     name: String,
     prev_suspend_point: Option<String>,
     state: TaskState,
+    locks_held: HashSet<String>,
 }
 
 pub(crate) struct TaskStartBarrier {
@@ -59,6 +62,7 @@ enum TaskState {
     // The task is ready to be executed (at suspension point)
     ReadyAtPoint {
         point: String,
+        waiting_for_locks: Vec<String>,
     },
     // The task is ready to be executed (at suspension point)
     Unschedulable {
@@ -91,6 +95,7 @@ impl Scheduler {
                 task_selector,
                 tasks: Vec::new(),
                 task_start_barriers: Vec::new(),
+                locks_held: HashSet::new(),
                 trace: Vec::new(),
             }),
             scheduler_notify: tokio::sync::Notify::new(),
@@ -151,6 +156,7 @@ impl Scheduler {
             name: name.to_string(),
             prev_suspend_point: None,
             state: TaskState::Pending { start_barrier },
+            locks_held: HashSet::new(),
         });
         id
     }
@@ -222,9 +228,22 @@ impl Scheduler {
         self.scheduler_notify.notify_waiters();
     }
 
-    pub(crate) async fn on_reached_point(&self, task_id: TaskId, name: &str) {
-        println!("reached point {task_id:?} {name}");
-        let mut inner = self.lock();
+    pub(crate) async fn on_reached_point(
+        &self,
+        task_id: TaskId,
+        name: &str,
+        acquire_locks: Vec<String>,
+        release_locks: &[String],
+    ) {
+        if acquire_locks.is_empty() && release_locks.is_empty() {
+            println!("reached point {task_id:?} {name}");
+        } else {
+            println!(
+                "reached point {task_id:?} {name} with acquire_locks={acquire_locks:?} release_locks={release_locks:?}"
+            );
+        }
+        let mut guard = self.lock();
+        let inner = &mut *guard;
         let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
         match &task.state {
             TaskState::Running => {}
@@ -242,10 +261,17 @@ impl Scheduler {
                 );
             }
         }
+        for lock in release_locks {
+            assert!(task.locks_held.contains(lock));
+            assert!(inner.locks_held.contains(lock));
+            task.locks_held.remove(lock);
+            inner.locks_held.remove(lock);
+        }
         task.state = TaskState::ReadyAtPoint {
             point: name.to_string(),
+            waiting_for_locks: acquire_locks,
         };
-        drop(inner);
+        drop(guard);
         self.scheduler_notify.notify_waiters();
         loop {
             self.task_notify.notified().await;
@@ -303,6 +329,7 @@ impl Scheduler {
         };
         task.state = TaskState::ReadyAtPoint {
             point: interval_name.clone(),
+            waiting_for_locks: Vec::new(),
         };
         drop(inner);
         self.scheduler_notify.notify_waiters();
@@ -368,13 +395,23 @@ impl Scheduler {
                 .iter()
                 .any(|task| matches!(task.state, TaskState::Running));
             if !has_running {
-                if let Some(next_running) =
-                    inner.task_selector.choose_next_running_task(&inner.tasks)
+                if let Some(next_running) = inner
+                    .task_selector
+                    .choose_next_running_task(&inner.tasks, &inner.locks_held)
                 {
                     let task = inner.tasks.get_mut(next_running).unwrap();
                     task.prev_suspend_point =
                         match mem::replace(&mut task.state, TaskState::Running) {
-                            TaskState::ReadyAtPoint { point } => {
+                            TaskState::ReadyAtPoint {
+                                point,
+                                waiting_for_locks,
+                            } => {
+                                for lock in waiting_for_locks {
+                                    assert!(!task.locks_held.contains(&lock));
+                                    assert!(!inner.locks_held.contains(&lock));
+                                    task.locks_held.insert(lock.clone());
+                                    inner.locks_held.insert(lock);
+                                }
                                 inner.trace.push((task.id, point.clone()));
                                 Some(point)
                             }
@@ -410,25 +447,28 @@ impl Drop for CurrentSchedulerGuard {
 }
 
 impl TaskSelector {
-    fn choose_next_running_task(&mut self, tasks: &[Task]) -> Option<usize> {
+    fn choose_next_running_task(
+        &mut self,
+        tasks: &[Task],
+        locks_held: &HashSet<String>,
+    ) -> Option<usize> {
         match self {
             TaskSelector::Random(random_task_selector) => {
-                random_task_selector.choose_next_running_task(tasks)
+                random_task_selector.choose_next_running_task(tasks, locks_held)
             }
         }
     }
 }
 
 impl RandomTaskSelector {
-    fn choose_next_running_task(&mut self, tasks: &[Task]) -> Option<usize> {
+    fn choose_next_running_task(
+        &mut self,
+        tasks: &[Task],
+        locks_held: &HashSet<String>,
+    ) -> Option<usize> {
         let num_ready = tasks
             .iter()
-            .filter(|task| {
-                matches!(
-                    task.state,
-                    TaskState::ReadyAtPoint { .. } | TaskState::ReadyAtStart
-                )
-            })
+            .filter(|task| Self::may_choose_task(task, locks_held))
             .count();
         if num_ready == 0 {
             return None;
@@ -437,15 +477,26 @@ impl RandomTaskSelector {
         let idx = tasks
             .iter()
             .enumerate()
-            .filter(|(_, task)| {
-                matches!(
-                    task.state,
-                    TaskState::ReadyAtPoint { .. } | TaskState::ReadyAtStart
-                )
-            })
+            .filter(|(_, task)| Self::may_choose_task(task, locks_held))
             .nth(ord)
             .unwrap()
             .0;
         Some(idx)
+    }
+
+    fn may_choose_task(task: &Task, locks_held: &HashSet<String>) -> bool {
+        match &task.state {
+            TaskState::ReadyAtStart => true,
+            TaskState::ReadyAtPoint {
+                waiting_for_locks, ..
+            } => waiting_for_locks
+                .iter()
+                .all(|lock| !locks_held.contains(lock)),
+            TaskState::Pending { .. }
+            | TaskState::WaitingAtStartBarrier { .. }
+            | TaskState::Unschedulable { .. }
+            | TaskState::Running
+            | TaskState::Finished => false,
+        }
     }
 }

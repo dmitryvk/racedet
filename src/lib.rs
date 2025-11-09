@@ -39,7 +39,23 @@ pub async fn execution_point(name: &str) {
     if let Some(scheduler) = Scheduler::current()
         && let Some(task_id) = executor::current_task()
     {
-        scheduler.on_reached_point(task_id, name).await;
+        scheduler
+            .on_reached_point(task_id, name, Vec::new(), &[])
+            .await;
+    }
+}
+
+pub async fn execution_point_with_locks(
+    name: &str,
+    acquire_locks: Vec<String>,
+    release_locks: &[String],
+) {
+    if let Some(scheduler) = Scheduler::current()
+        && let Some(task_id) = executor::current_task()
+    {
+        scheduler
+            .on_reached_point(task_id, name, acquire_locks, release_locks)
+            .await;
     }
 }
 
