@@ -37,6 +37,7 @@ pub(crate) struct Task {
 }
 
 pub(crate) struct TaskStartBarrier {
+    #[expect(dead_code, reason = "might be used")]
     id: TaskStartBarrierId,
     name: String,
     num_tasks: usize,

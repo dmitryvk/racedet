@@ -1,13 +1,13 @@
 use std::sync::{Arc, atomic::AtomicI64};
 
 use conc_checker::{
-    execution_point, register_task, register_task_start_barrier, run_with_schedule, task,
+    execute, execution_point, new_scheduler, register_task, register_task_start_barrier, task,
 };
 use tokio::join;
 
 #[tokio::main]
 async fn main() {
-    let (trace, res) = run_with_schedule(foo()).await;
+    let (trace, res) = execute(new_scheduler(), foo()).await;
     println!("{res:?}");
     println!("{trace}");
 }

@@ -95,17 +95,24 @@ pub async fn task_join<T>(name: &str, inner: impl Future<Output = T>) -> T {
     res
 }
 
-pub async fn run_with_schedule<T, Fut>(inner: Fut) -> (Trace, RunResult<T>)
+pub struct SchedulerHandle(Arc<Scheduler>);
+
+pub fn new_scheduler() -> SchedulerHandle {
+    SchedulerHandle(Scheduler::new(scheduler::TaskSelector::Random(
+        RandomTaskSelector::new(),
+    )))
+}
+
+pub async fn execute<T, Fut>(scheduler: SchedulerHandle, inner: Fut) -> (Trace, RunResult<T>)
 where
     Fut: Future<Output = T> + Sized,
 {
-    let scheduler = Scheduler::new(scheduler::TaskSelector::Random(RandomTaskSelector::new()));
     let res = RunAlong {
-        main_fut: executor::run(scheduler.clone(), inner),
-        aux_fut: scheduler.run_control_loop().fuse(),
+        main_fut: executor::run(scheduler.0.clone(), inner),
+        aux_fut: scheduler.0.run_control_loop().fuse(),
     }
     .await;
-    let trace = scheduler.get_trace();
+    let trace = scheduler.0.get_trace();
     (trace, res)
 }
 

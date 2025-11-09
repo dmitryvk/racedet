@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use conc_checker::register_task_start_barrier;
-use conc_checker::{execution_point, register_task, run_with_schedule, task, task_join};
+use conc_checker::{execute, new_scheduler, register_task_start_barrier};
+use conc_checker::{execution_point, register_task, task, task_join};
 use futures::FutureExt;
 use futures::select;
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
@@ -12,7 +12,7 @@ async fn main() {
     match timeout(
         Duration::from_secs(1),
         CaptureSpanAndStackTrace,
-        run_with_schedule(foo()),
+        execute(new_scheduler(), foo()),
     )
     .await
     {
