@@ -1,12 +1,10 @@
 use std::time::Duration;
 
-use conc_checker::{execute, new_scheduler, register_task_start_barrier};
+use conc_checker::{execute, new_scheduler};
 use conc_checker::{execution_point, register_task, task, task_join};
-use futures::select;
+use futures::StreamExt;
 use futures::stream::FuturesUnordered;
-use futures::{FutureExt, StreamExt};
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
-use tokio::{join, time::sleep};
 
 #[tokio::main]
 async fn main() {
