@@ -6,7 +6,7 @@ use pin_project::pin_project;
 use crate::{PanicInfo, RunResult, TaskId, scheduler::Scheduler};
 
 thread_local! {
-    static CURRENT_TASK: RefCell<Option<TaskId>> = RefCell::new(None);
+    static CURRENT_TASK: RefCell<Option<TaskId>> = const { RefCell::new(None) };
 }
 
 pub(crate) async fn run<T, Fut>(scheduler: Arc<Scheduler>, fut: Fut) -> RunResult<T>
@@ -84,15 +84,13 @@ impl<Fut: Future> Future for TaskFuture<Fut> {
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let _guard = this
-            .task_id
-            .map(|task_id| CurrentTaskIdGuard::install(task_id));
+        let _guard = this.task_id.map(CurrentTaskIdGuard::install);
         this.inner.poll(cx)
     }
 }
 
 pub(crate) fn current_task() -> Option<TaskId> {
-    CURRENT_TASK.with_borrow(|t| t.clone())
+    CURRENT_TASK.with_borrow(|t| *t)
 }
 
 struct CurrentTaskIdGuard {

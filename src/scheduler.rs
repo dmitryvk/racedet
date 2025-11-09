@@ -11,7 +11,7 @@ use itertools::Itertools;
 use crate::{TaskId, Trace};
 
 thread_local! {
-    static CURRENT_SCHEDULER: RefCell<Option<Arc<Scheduler>>> = RefCell::new(None);
+    static CURRENT_SCHEDULER: RefCell<Option<Arc<Scheduler>>> = const { RefCell::new(None) };
 }
 
 pub(crate) struct Scheduler {
@@ -45,6 +45,8 @@ enum TaskState {
     ReadyAtStart,
     // The task is ready to be executed (at suspension point)
     ReadyAtPoint { point: String },
+    // The task is ready to be executed (at suspension point)
+    Unschedulable { interval_name: String },
     // The task is currently running
     Running,
     // The task is finished
@@ -136,10 +138,12 @@ impl Scheduler {
 
     pub(crate) fn on_task_finished(&self, task_id: TaskId) {
         println!("task {task_id:?} finished");
-        let mut inner = self.lock();
+        let mut guard = self.lock();
+        let inner = &mut *guard;
         let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
         task.state = TaskState::Finished;
-        drop(inner);
+        inner.trace.push((task.id, "finished".to_string()));
+        drop(guard);
         self.scheduler_notify.notify_waiters();
     }
 
@@ -153,6 +157,7 @@ impl Scheduler {
             | TaskState::WaitingForOtherPending
             | TaskState::ReadyAtStart
             | TaskState::ReadyAtPoint { .. }
+            | TaskState::Unschedulable { .. }
             | TaskState::Finished => {
                 panic!(
 "task {} {} reached point {name}, but its state is not Running, but rather is {:?}.
@@ -173,6 +178,65 @@ impl Scheduler {
             let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
             if matches!(task.state, TaskState::Running) {
                 println!("task {task_id:?} resumed from {name}");
+                break;
+            }
+        }
+    }
+
+    pub(crate) fn on_task_unschedulable(&self, task_id: TaskId, name: &str) {
+        println!("task {task_id:?} reached unschedulable interval {name}");
+        let mut inner = self.lock();
+        let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
+        match &task.state {
+            TaskState::Running => {}
+            TaskState::Pending
+            | TaskState::WaitingForOtherPending
+            | TaskState::ReadyAtStart
+            | TaskState::ReadyAtPoint { .. }
+            | TaskState::Finished
+            | TaskState::Unschedulable { .. } => {
+                panic!(
+                    "task {} {} reached unschedulable interval {name}, but its state is not Running, but rather is {:?}.",
+                    task.id.0, task.name, task.state
+                );
+            }
+        }
+        task.state = TaskState::Unschedulable {
+            interval_name: name.to_string(),
+        };
+        drop(inner);
+        self.scheduler_notify.notify_waiters();
+    }
+
+    pub(crate) async fn on_task_schedulable(&self, task_id: TaskId) {
+        println!("task {task_id:?} leaves unschedulable interval");
+        let mut inner = self.lock();
+        let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
+        let interval_name = match &task.state {
+            TaskState::Unschedulable { interval_name } => interval_name.clone(),
+            TaskState::Running
+            | TaskState::Pending
+            | TaskState::WaitingForOtherPending
+            | TaskState::ReadyAtStart
+            | TaskState::ReadyAtPoint { .. }
+            | TaskState::Finished => {
+                panic!(
+                    "task {} {} leabes unschedulable interval, but its state is not Unschedulable, but rather is {:?}.",
+                    task.id.0, task.name, task.state
+                );
+            }
+        };
+        task.state = TaskState::ReadyAtPoint {
+            point: interval_name.clone(),
+        };
+        drop(inner);
+        self.scheduler_notify.notify_waiters();
+        loop {
+            self.task_notify.notified().await;
+            let mut inner = self.lock();
+            let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
+            if matches!(task.state, TaskState::Running) {
+                println!("task {task_id:?} resumed from {interval_name}");
                 break;
             }
         }
@@ -206,7 +270,7 @@ impl Scheduler {
                     .tasks
                     .iter()
                     .map(|t| format!(
-                        "{{ task {:?} name {} prev {:?} state {:?} }}",
+                        "{{ id={:?} name={} prev={:?} state={:?} }}",
                         t.id, t.name, t.prev_suspend_point, t.state
                     ))
                     .join(", ")

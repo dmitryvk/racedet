@@ -75,6 +75,19 @@ impl Drop for TaskFinishedGuard {
     }
 }
 
+pub async fn task_join<T>(name: &str, inner: impl Future<Output = T>) -> T {
+    let task_id = executor::current_task();
+    let scheduler = Scheduler::current();
+    if let (Some(task_id), Some(scheduler)) = (task_id, scheduler.as_ref()) {
+        scheduler.on_task_unschedulable(task_id, name);
+    }
+    let res = inner.await;
+    if let (Some(task_id), Some(scheduler)) = (task_id, scheduler.as_ref()) {
+        scheduler.on_task_schedulable(task_id).await;
+    }
+    res
+}
+
 pub async fn run_with_schedule<T, Fut>(inner: Fut) -> (Trace, RunResult<T>)
 where
     Fut: Future<Output = T> + Sized,
