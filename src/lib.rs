@@ -16,6 +16,9 @@ pub struct RegisteredTaskId(Option<(Arc<Scheduler>, TaskId)>);
 #[derive(Clone, Copy, Debug)]
 struct TaskId(NonZeroU64);
 
+#[derive(Clone, Copy, Debug)]
+pub struct TaskStartBarrierId(NonZeroU64);
+
 impl RegisteredTaskId {
     const INVALID: RegisteredTaskId = RegisteredTaskId(None);
 
@@ -40,9 +43,13 @@ pub async fn execution_point(name: &str) {
     }
 }
 
-pub fn register_task(name: &str) -> RegisteredTaskId {
+pub fn register_task_start_barrier(name: &str, count: usize) -> Option<TaskStartBarrierId> {
+    Scheduler::current().map(|scheduler| scheduler.register_task_start_barrier(name, count))
+}
+
+pub fn register_task(name: &str, start_barrier: Option<TaskStartBarrierId>) -> RegisteredTaskId {
     if let Some(scheduler) = Scheduler::current() {
-        let task_id = scheduler.register_task(name);
+        let task_id = scheduler.register_task(name, start_barrier);
         RegisteredTaskId(Some((scheduler, task_id)))
     } else {
         RegisteredTaskId::INVALID

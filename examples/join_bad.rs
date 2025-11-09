@@ -9,7 +9,7 @@ async fn main() {
 }
 
 async fn foo() {
-    task(register_task("bar"), bar()).await;
+    task(register_task("bar", None), bar()).await;
 }
 
 async fn bar() {

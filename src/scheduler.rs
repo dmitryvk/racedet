@@ -8,7 +8,7 @@ use std::{
 
 use itertools::Itertools;
 
-use crate::{TaskId, Trace};
+use crate::{TaskId, TaskStartBarrierId, Trace};
 
 thread_local! {
     static CURRENT_SCHEDULER: RefCell<Option<Arc<Scheduler>>> = const { RefCell::new(None) };
@@ -22,8 +22,10 @@ pub(crate) struct Scheduler {
 
 struct Inner {
     next_task_id: u64,
+    next_task_start_barrier_id: u64,
     task_selector: TaskSelector,
     tasks: Vec<Task>,
+    task_start_barriers: Vec<TaskStartBarrier>,
     trace: Vec<(TaskId, String)>,
 }
 
@@ -34,19 +36,33 @@ pub(crate) struct Task {
     state: TaskState,
 }
 
+pub(crate) struct TaskStartBarrier {
+    id: TaskStartBarrierId,
+    name: String,
+    num_tasks: usize,
+    num_tasks_started: usize,
+}
+
 #[derive(Debug)]
 enum TaskState {
     // The task is registered, but not started.
-    Pending,
-    // The task is almost started, but waiting for other pending tasks.
-    // All tasks progress to [`ReadyAtStart`] when there are no more pending tasks
-    WaitingForOtherPending,
+    Pending {
+        start_barrier: Option<TaskStartBarrierId>,
+    },
+    // The task is almost started, but waiting for other pending tasks with the same `barrier_id`.
+    WaitingAtStartBarrier {
+        barrier_id: TaskStartBarrierId,
+    },
     // The task is ready to be executed (at the very beginning of the task code)
     ReadyAtStart,
     // The task is ready to be executed (at suspension point)
-    ReadyAtPoint { point: String },
+    ReadyAtPoint {
+        point: String,
+    },
     // The task is ready to be executed (at suspension point)
-    Unschedulable { interval_name: String },
+    Unschedulable {
+        interval_name: String,
+    },
     // The task is currently running
     Running,
     // The task is finished
@@ -70,8 +86,10 @@ impl Scheduler {
         Arc::new(Scheduler {
             inner: Mutex::new(Inner {
                 next_task_id: 1,
+                next_task_start_barrier_id: 1,
                 task_selector,
                 tasks: Vec::new(),
+                task_start_barriers: Vec::new(),
                 trace: Vec::new(),
             }),
             scheduler_notify: tokio::sync::Notify::new(),
@@ -100,7 +118,29 @@ impl Scheduler {
         }
     }
 
-    pub(crate) fn register_task(&self, name: &str) -> TaskId {
+    pub(crate) fn register_task_start_barrier(
+        &self,
+        name: &str,
+        num_tasks: usize,
+    ) -> TaskStartBarrierId {
+        let mut inner = self.lock();
+        let id = TaskStartBarrierId(NonZeroU64::new(inner.next_task_start_barrier_id).unwrap());
+        println!("task start barrier {id:?} {name} registered");
+        inner.next_task_start_barrier_id += 1;
+        inner.task_start_barriers.push(TaskStartBarrier {
+            id,
+            name: name.to_string(),
+            num_tasks,
+            num_tasks_started: 0,
+        });
+        id
+    }
+
+    pub(crate) fn register_task(
+        &self,
+        name: &str,
+        start_barrier: Option<TaskStartBarrierId>,
+    ) -> TaskId {
         let mut inner = self.lock();
         let id = TaskId(NonZeroU64::new(inner.next_task_id).unwrap());
         println!("task {id:?} {name} registered");
@@ -109,7 +149,7 @@ impl Scheduler {
             id,
             name: name.to_string(),
             prev_suspend_point: None,
-            state: TaskState::Pending,
+            state: TaskState::Pending { start_barrier },
         });
         id
     }
@@ -120,10 +160,44 @@ impl Scheduler {
 
     pub(crate) async fn on_task_started(&self, task_id: TaskId) {
         println!("task {task_id:?} started");
-        let mut inner = self.lock();
+        let mut guard = self.lock();
+        let inner = &mut *guard;
         let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
-        task.state = TaskState::WaitingForOtherPending;
-        drop(inner);
+        let start_barrier = match &task.state {
+            TaskState::Pending { start_barrier } => *start_barrier,
+            TaskState::WaitingAtStartBarrier { .. }
+            | TaskState::ReadyAtStart
+            | TaskState::ReadyAtPoint { .. }
+            | TaskState::Unschedulable { .. }
+            | TaskState::Running
+            | TaskState::Finished => {
+                panic!(
+                    "task {} {} is started, but its state is not Pending, but rather is {:?}.
+  This might mean that an internal task concurrency is happening (e.g., join or FuturesUnordered).
+  If this is the case, each spawned task must be wrapped with `task`",
+                    task.id.0, task.name, task.state
+                );
+            }
+        };
+        task.state = if let Some(start_barrier) = start_barrier {
+            let barrier = inner
+                .task_start_barriers
+                .get_mut(usize::try_from(start_barrier.0.get() - 1).unwrap())
+                .unwrap();
+            if barrier.num_tasks_started >= barrier.num_tasks {
+                panic!("too much tasks started in barrier {}", barrier.name);
+            }
+            barrier.num_tasks_started += 1;
+            if barrier.num_tasks == barrier.num_tasks_started {
+                println!("all tasks started in barrier {}", barrier.name);
+            }
+            TaskState::WaitingAtStartBarrier {
+                barrier_id: start_barrier,
+            }
+        } else {
+            TaskState::ReadyAtStart
+        };
+        drop(guard);
         self.scheduler_notify.notify_waiters();
         loop {
             self.task_notify.notified().await;
@@ -153,8 +227,8 @@ impl Scheduler {
         let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
         match &task.state {
             TaskState::Running => {}
-            TaskState::Pending
-            | TaskState::WaitingForOtherPending
+            TaskState::Pending { .. }
+            | TaskState::WaitingAtStartBarrier { .. }
             | TaskState::ReadyAtStart
             | TaskState::ReadyAtPoint { .. }
             | TaskState::Unschedulable { .. }
@@ -189,8 +263,8 @@ impl Scheduler {
         let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
         match &task.state {
             TaskState::Running => {}
-            TaskState::Pending
-            | TaskState::WaitingForOtherPending
+            TaskState::Pending { .. }
+            | TaskState::WaitingAtStartBarrier { .. }
             | TaskState::ReadyAtStart
             | TaskState::ReadyAtPoint { .. }
             | TaskState::Finished
@@ -215,8 +289,8 @@ impl Scheduler {
         let interval_name = match &task.state {
             TaskState::Unschedulable { interval_name } => interval_name.clone(),
             TaskState::Running
-            | TaskState::Pending
-            | TaskState::WaitingForOtherPending
+            | TaskState::Pending { .. }
+            | TaskState::WaitingAtStartBarrier { .. }
             | TaskState::ReadyAtStart
             | TaskState::ReadyAtPoint { .. }
             | TaskState::Finished => {
@@ -275,15 +349,15 @@ impl Scheduler {
                     ))
                     .join(", ")
             );
-            let has_pending = inner
-                .tasks
-                .iter()
-                .any(|task| matches!(task.state, TaskState::Pending));
-            if !has_pending {
-                for task in &mut inner.tasks {
-                    if matches!(task.state, TaskState::WaitingForOtherPending) {
-                        println!("task {:?} moved to ready", task.id);
+            for task in &mut inner.tasks {
+                if let TaskState::WaitingAtStartBarrier { barrier_id } = &task.state {
+                    let barrier = inner
+                        .task_start_barriers
+                        .get(usize::try_from(barrier_id.0.get() - 1).unwrap())
+                        .unwrap();
+                    if barrier.num_tasks_started == barrier.num_tasks {
                         task.state = TaskState::ReadyAtStart;
+                        println!("task {:?} is moved from Barrier to Ready", task.id);
                     }
                 }
             }
@@ -308,13 +382,13 @@ impl Scheduler {
                             }
                             _ => None,
                         };
-                    println!("task {:?} is ready to run", task.id);
+                    println!("switching to task {:?}", task.id);
                     self.task_notify.notify_waiters();
                 } else {
                     println!("no ready tasks!");
                 }
             } else {
-                println!("a task is already running");
+                println!("run loop control: a task is already running");
             }
             drop(guard);
 
