@@ -344,6 +344,7 @@ impl Scheduler {
                 inner
                     .tasks
                     .iter()
+                    .take(10)
                     .map(|t| format!(
                         "{{ id={:?} name={} prev={:?} state={:?} }}",
                         t.id, t.name, t.prev_suspend_point, t.state
