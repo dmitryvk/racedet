@@ -131,7 +131,7 @@ impl Scheduler {
     ) -> TaskStartBarrierId {
         let mut inner = self.lock();
         let id = TaskStartBarrierId(NonZeroU64::new(inner.next_task_start_barrier_id).unwrap());
-        println!("task start barrier {id:?} {name} registered");
+        tracing::debug!("task start barrier {id:?} {name} registered");
         inner.next_task_start_barrier_id += 1;
         inner.task_start_barriers.push(TaskStartBarrier {
             id,
@@ -149,7 +149,7 @@ impl Scheduler {
     ) -> TaskId {
         let mut inner = self.lock();
         let id = TaskId(NonZeroU64::new(inner.next_task_id).unwrap());
-        println!("task {id:?} {name} registered");
+        tracing::debug!("task {id:?} {name} registered");
         inner.next_task_id += 1;
         inner.tasks.push(Task {
             id,
@@ -166,7 +166,7 @@ impl Scheduler {
     }
 
     pub(crate) async fn on_task_started(&self, task_id: TaskId) {
-        println!("task {task_id:?} started");
+        tracing::debug!("task {task_id:?} started");
         let mut guard = self.lock();
         let inner = &mut *guard;
         let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
@@ -196,7 +196,7 @@ impl Scheduler {
             }
             barrier.num_tasks_started += 1;
             if barrier.num_tasks == barrier.num_tasks_started {
-                println!("all tasks started in barrier {}", barrier.name);
+                tracing::debug!("all tasks started in barrier {}", barrier.name);
             }
             TaskState::WaitingAtStartBarrier {
                 barrier_id: start_barrier,
@@ -211,14 +211,14 @@ impl Scheduler {
             let mut inner = self.lock();
             let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
             if matches!(task.state, TaskState::Running) {
-                println!("task {task_id:?} resumed from start");
+                tracing::debug!("task {task_id:?} resumed from start");
                 break;
             }
         }
     }
 
     pub(crate) fn on_task_finished(&self, task_id: TaskId) {
-        println!("task {task_id:?} finished");
+        tracing::debug!("task {task_id:?} finished");
         let mut guard = self.lock();
         let inner = &mut *guard;
         let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
@@ -236,9 +236,9 @@ impl Scheduler {
         release_locks: &[String],
     ) {
         if acquire_locks.is_empty() && release_locks.is_empty() {
-            println!("reached point {task_id:?} {name}");
+            tracing::debug!("reached point {task_id:?} {name}");
         } else {
-            println!(
+            tracing::debug!(
                 "reached point {task_id:?} {name} with acquire_locks={acquire_locks:?} release_locks={release_locks:?}"
             );
         }
@@ -278,14 +278,14 @@ impl Scheduler {
             let mut inner = self.lock();
             let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
             if matches!(task.state, TaskState::Running) {
-                println!("task {task_id:?} resumed from {name}");
+                tracing::debug!("task {task_id:?} resumed from {name}");
                 break;
             }
         }
     }
 
     pub(crate) fn on_task_unschedulable(&self, task_id: TaskId, name: &str) {
-        println!("task {task_id:?} reached unschedulable interval {name}");
+        tracing::debug!("task {task_id:?} reached unschedulable interval {name}");
         let mut inner = self.lock();
         let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
         match &task.state {
@@ -310,7 +310,7 @@ impl Scheduler {
     }
 
     pub(crate) async fn on_task_schedulable(&self, task_id: TaskId) {
-        println!("task {task_id:?} leaves unschedulable interval");
+        tracing::debug!("task {task_id:?} leaves unschedulable interval");
         let mut inner = self.lock();
         let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
         let interval_name = match &task.state {
@@ -338,7 +338,7 @@ impl Scheduler {
             let mut inner = self.lock();
             let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
             if matches!(task.state, TaskState::Running) {
-                println!("task {task_id:?} resumed from {interval_name}");
+                tracing::debug!("task {task_id:?} resumed from {interval_name}");
                 break;
             }
         }
@@ -359,14 +359,14 @@ impl Scheduler {
     }
 
     pub(crate) async fn run_control_loop(&self) {
-        println!("run control loop started");
+        tracing::debug!("run control loop started");
         loop {
             let mut notified = pin!(self.scheduler_notify.notified());
             notified.as_mut().enable();
 
             let mut guard = self.lock();
             let inner = &mut *guard;
-            println!(
+            tracing::debug!(
                 "run control loop; tasks=[{}]",
                 inner
                     .tasks
@@ -386,7 +386,7 @@ impl Scheduler {
                         .unwrap();
                     if barrier.num_tasks_started == barrier.num_tasks {
                         task.state = TaskState::ReadyAtStart;
-                        println!("task {:?} is moved from Barrier to Ready", task.id);
+                        tracing::debug!("task {:?} is moved from Barrier to Ready", task.id);
                     }
                 }
             }
@@ -421,13 +421,13 @@ impl Scheduler {
                             }
                             _ => None,
                         };
-                    println!("switching to task {:?}", task.id);
+                    tracing::debug!("switching to task {:?}", task.id);
                     self.task_notify.notify_waiters();
                 } else {
-                    println!("no ready tasks!");
+                    tracing::debug!("no ready tasks!");
                 }
             } else {
-                println!("run loop control: a task is already running");
+                tracing::debug!("run loop control: a task is already running");
             }
             drop(guard);
 
