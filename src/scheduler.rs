@@ -167,50 +167,51 @@ impl Scheduler {
 
     pub(crate) async fn on_task_started(&self, task_id: TaskId) {
         tracing::debug!("task {task_id:?} started");
-        let mut guard = self.lock();
-        let inner = &mut *guard;
-        let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
-        let start_barrier = match &task.state {
-            TaskState::Pending { start_barrier } => *start_barrier,
-            TaskState::WaitingAtStartBarrier { .. }
-            | TaskState::ReadyAtStart
-            | TaskState::ReadyAtPoint { .. }
-            | TaskState::Unschedulable { .. }
-            | TaskState::Running
-            | TaskState::Finished => {
-                panic!(
-                    "task {} {} is started, but its state is not Pending, but rather is {:?}.
+        {
+            let mut guard = self.lock();
+            let inner = &mut *guard;
+            let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
+            let start_barrier = match &task.state {
+                TaskState::Pending { start_barrier } => *start_barrier,
+                TaskState::WaitingAtStartBarrier { .. }
+                | TaskState::ReadyAtStart
+                | TaskState::ReadyAtPoint { .. }
+                | TaskState::Unschedulable { .. }
+                | TaskState::Running { .. }
+                | TaskState::Finished => {
+                    panic!(
+                        "task {} {} is started, but its state is not Pending, but rather is {:?}.
   This might mean that an internal task concurrency is happening (e.g., join or FuturesUnordered).
   If this is the case, each spawned task must be wrapped with `task`",
-                    task.id.0, task.name, task.state
-                );
-            }
-        };
-        task.state = if let Some(start_barrier) = start_barrier {
-            let barrier = inner
-                .task_start_barriers
-                .get_mut(usize::try_from(start_barrier.0.get() - 1).unwrap())
-                .unwrap();
-            if barrier.num_tasks_started >= barrier.num_tasks {
-                panic!("too much tasks started in barrier {}", barrier.name);
-            }
-            barrier.num_tasks_started += 1;
-            if barrier.num_tasks == barrier.num_tasks_started {
-                tracing::debug!("all tasks started in barrier {}", barrier.name);
-            }
-            TaskState::WaitingAtStartBarrier {
-                barrier_id: start_barrier,
-            }
-        } else {
-            TaskState::ReadyAtStart
-        };
-        drop(guard);
+                        task.id.0, task.name, task.state
+                    );
+                }
+            };
+            task.state = if let Some(start_barrier) = start_barrier {
+                let barrier = inner
+                    .task_start_barriers
+                    .get_mut(usize::try_from(start_barrier.0.get() - 1).unwrap())
+                    .unwrap();
+                if barrier.num_tasks_started >= barrier.num_tasks {
+                    panic!("too much tasks started in barrier {}", barrier.name);
+                }
+                barrier.num_tasks_started += 1;
+                if barrier.num_tasks == barrier.num_tasks_started {
+                    tracing::debug!("all tasks started in barrier {}", barrier.name);
+                }
+                TaskState::WaitingAtStartBarrier {
+                    barrier_id: start_barrier,
+                }
+            } else {
+                TaskState::ReadyAtStart
+            };
+        }
         self.scheduler_notify.notify_waiters();
         loop {
             self.task_notify.notified().await;
             let mut inner = self.lock();
             let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
-            if matches!(task.state, TaskState::Running) {
+            if matches!(task.state, TaskState::Running { .. }) {
                 tracing::debug!("task {task_id:?} resumed from start");
                 break;
             }
@@ -242,42 +243,46 @@ impl Scheduler {
                 "reached point {task_id:?} {name} with acquire_locks={acquire_locks:?} release_locks={release_locks:?}"
             );
         }
-        let mut guard = self.lock();
-        let inner = &mut *guard;
-        let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
-        match &task.state {
-            TaskState::Running => {}
-            TaskState::Pending { .. }
-            | TaskState::WaitingAtStartBarrier { .. }
-            | TaskState::ReadyAtStart
-            | TaskState::ReadyAtPoint { .. }
-            | TaskState::Unschedulable { .. }
-            | TaskState::Finished => {
-                panic!(
+        {
+            let mut guard = self.lock();
+            let inner = &mut *guard;
+            let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
+            match &task.state {
+                TaskState::Running { .. } => {
+                    inner.trace.push((task.id, format!("->{name}")));
+                }
+                TaskState::Pending { .. }
+                | TaskState::WaitingAtStartBarrier { .. }
+                | TaskState::ReadyAtStart
+                | TaskState::ReadyAtPoint { .. }
+                | TaskState::Unschedulable { .. }
+                | TaskState::Finished => {
+                    panic!(
 "task {} {} reached point {name}, but its state is not Running, but rather is {:?}.
   This might mean that an internal task concurrency is happening (e.g., join or FuturesUnordered).
   If this is the case, each spawned task must be wrapped with `task`",
                     task.id.0, task.name, task.state
                 );
+                }
             }
+            for lock in release_locks {
+                assert!(task.locks_held.contains(lock));
+                assert!(inner.locks_held.contains(lock));
+                task.locks_held.remove(lock);
+                inner.locks_held.remove(lock);
+            }
+            task.state = TaskState::ReadyAtPoint {
+                point: name.to_string(),
+                waiting_for_locks: acquire_locks,
+            };
+            drop(guard);
         }
-        for lock in release_locks {
-            assert!(task.locks_held.contains(lock));
-            assert!(inner.locks_held.contains(lock));
-            task.locks_held.remove(lock);
-            inner.locks_held.remove(lock);
-        }
-        task.state = TaskState::ReadyAtPoint {
-            point: name.to_string(),
-            waiting_for_locks: acquire_locks,
-        };
-        drop(guard);
         self.scheduler_notify.notify_waiters();
         loop {
             self.task_notify.notified().await;
             let mut inner = self.lock();
             let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
-            if matches!(task.state, TaskState::Running) {
+            if matches!(task.state, TaskState::Running { .. }) {
                 tracing::debug!("task {task_id:?} resumed from {name}");
                 break;
             }
@@ -286,10 +291,13 @@ impl Scheduler {
 
     pub(crate) fn on_task_unschedulable(&self, task_id: TaskId, name: &str) {
         tracing::debug!("task {task_id:?} reached unschedulable interval {name}");
-        let mut inner = self.lock();
+        let mut guard = self.lock();
+        let inner = &mut *guard;
         let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
         match &task.state {
-            TaskState::Running => {}
+            TaskState::Running { .. } => {
+                inner.trace.push((task.id, format!("->{name}...")));
+            }
             TaskState::Pending { .. }
             | TaskState::WaitingAtStartBarrier { .. }
             | TaskState::ReadyAtStart
@@ -305,39 +313,41 @@ impl Scheduler {
         task.state = TaskState::Unschedulable {
             interval_name: name.to_string(),
         };
-        drop(inner);
+        drop(guard);
         self.scheduler_notify.notify_waiters();
     }
 
     pub(crate) async fn on_task_schedulable(&self, task_id: TaskId) {
         tracing::debug!("task {task_id:?} leaves unschedulable interval");
-        let mut inner = self.lock();
+        let mut guard = self.lock();
+        let inner = &mut *guard;
         let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
         let interval_name = match &task.state {
             TaskState::Unschedulable { interval_name } => interval_name.clone(),
-            TaskState::Running
+            TaskState::Running { .. }
             | TaskState::Pending { .. }
             | TaskState::WaitingAtStartBarrier { .. }
             | TaskState::ReadyAtStart
             | TaskState::ReadyAtPoint { .. }
             | TaskState::Finished => {
                 panic!(
-                    "task {} {} leabes unschedulable interval, but its state is not Unschedulable, but rather is {:?}.",
+                    "task {} {} leaves unschedulable interval, but its state is not Unschedulable, but rather is {:?}.",
                     task.id.0, task.name, task.state
                 );
             }
         };
+        inner.trace.push((task.id, format!("->{interval_name}")));
         task.state = TaskState::ReadyAtPoint {
             point: interval_name.clone(),
             waiting_for_locks: Vec::new(),
         };
-        drop(inner);
+        drop(guard);
         self.scheduler_notify.notify_waiters();
         loop {
             self.task_notify.notified().await;
             let mut inner = self.lock();
             let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
-            if matches!(task.state, TaskState::Running) {
+            if matches!(task.state, TaskState::Running { .. }) {
                 tracing::debug!("task {task_id:?} resumed from {interval_name}");
                 break;
             }
@@ -358,78 +368,98 @@ impl Scheduler {
         }
     }
 
-    pub(crate) async fn run_control_loop(&self) {
+    pub(crate) async fn run_control_loop(&self, stop_barrier: Option<TaskStartBarrierId>) {
         tracing::debug!("run control loop started");
+        // TODO: stop when all finished (optionally)
         loop {
             let mut notified = pin!(self.scheduler_notify.notified());
             notified.as_mut().enable();
 
-            let mut guard = self.lock();
-            let inner = &mut *guard;
-            tracing::debug!(
-                "run control loop; tasks=[{}]",
-                inner
-                    .tasks
-                    .iter()
-                    .take(10)
-                    .map(|t| format!(
-                        "{{ id={:?} name={} prev={:?} state={:?} }}",
-                        t.id, t.name, t.prev_suspend_point, t.state
-                    ))
-                    .join(", ")
-            );
-            for task in &mut inner.tasks {
-                if let TaskState::WaitingAtStartBarrier { barrier_id } = &task.state {
-                    let barrier = inner
-                        .task_start_barriers
-                        .get(usize::try_from(barrier_id.0.get() - 1).unwrap())
-                        .unwrap();
-                    if barrier.num_tasks_started == barrier.num_tasks {
-                        task.state = TaskState::ReadyAtStart;
-                        tracing::debug!("task {:?} is moved from Barrier to Ready", task.id);
+            {
+                let mut guard = self.lock();
+                let inner = &mut *guard;
+                tracing::debug!(
+                    "run control loop; tasks=[{}]",
+                    inner
+                        .tasks
+                        .iter()
+                        .take(10)
+                        .map(|t| format!(
+                            "{{ id={:?} name={} prev={:?} state={:?} }}",
+                            t.id, t.name, t.prev_suspend_point, t.state
+                        ))
+                        .join(", ")
+                );
+                for task in &mut inner.tasks {
+                    if let TaskState::WaitingAtStartBarrier { barrier_id } = &task.state {
+                        let barrier = inner
+                            .task_start_barriers
+                            .get(usize::try_from(barrier_id.0.get() - 1).unwrap())
+                            .unwrap();
+                        if barrier.num_tasks_started == barrier.num_tasks {
+                            task.state = TaskState::ReadyAtStart;
+                            tracing::debug!("task {:?} is moved from Barrier to Ready", task.id);
+                        }
                     }
                 }
-            }
-            let has_running = inner
-                .tasks
-                .iter()
-                .any(|task| matches!(task.state, TaskState::Running));
-            if !has_running {
-                if let Some(next_running) = inner
-                    .task_selector
-                    .choose_next_running_task(&inner.tasks, &inner.locks_held)
-                {
-                    let task = inner.tasks.get_mut(next_running).unwrap();
-                    task.prev_suspend_point =
-                        match mem::replace(&mut task.state, TaskState::Running) {
-                            TaskState::ReadyAtPoint {
-                                point,
-                                waiting_for_locks,
-                            } => {
-                                for lock in waiting_for_locks {
-                                    assert!(!task.locks_held.contains(&lock));
-                                    assert!(!inner.locks_held.contains(&lock));
-                                    task.locks_held.insert(lock.clone());
-                                    inner.locks_held.insert(lock);
+                let has_running = inner
+                    .tasks
+                    .iter()
+                    .any(|task| matches!(task.state, TaskState::Running { .. }));
+                if !has_running {
+                    if let Some(next_running) = inner
+                        .task_selector
+                        .choose_next_running_task(&inner.tasks, &inner.locks_held)
+                    {
+                        let task = inner.tasks.get_mut(next_running).unwrap();
+                        task.prev_suspend_point =
+                            match mem::replace(&mut task.state, TaskState::Running) {
+                                TaskState::ReadyAtPoint {
+                                    point,
+                                    waiting_for_locks,
+                                } => {
+                                    for lock in waiting_for_locks {
+                                        assert!(!task.locks_held.contains(&lock));
+                                        assert!(!inner.locks_held.contains(&lock));
+                                        task.locks_held.insert(lock.clone());
+                                        inner.locks_held.insert(lock);
+                                    }
+                                    inner.trace.push((task.id, format!("{}->", point)));
+                                    Some(point)
                                 }
-                                inner.trace.push((task.id, point.clone()));
-                                Some(point)
-                            }
-                            TaskState::ReadyAtStart => {
-                                inner.trace.push((task.id, "start".to_string()));
-                                None
-                            }
-                            _ => None,
-                        };
-                    tracing::debug!("switching to task {:?}", task.id);
-                    self.task_notify.notify_waiters();
+                                TaskState::ReadyAtStart => {
+                                    inner.trace.push((task.id, "start->".to_string()));
+                                    None
+                                }
+                                _ => None,
+                            };
+                        tracing::debug!("switching to task {:?}", task.id);
+                        self.task_notify.notify_waiters();
+                    } else {
+                        tracing::debug!("no ready tasks!");
+                    }
                 } else {
-                    tracing::debug!("no ready tasks!");
+                    tracing::debug!("run loop control: a task is already running");
                 }
-            } else {
-                tracing::debug!("run loop control: a task is already running");
+
+                if let Some(stop_barrier) = stop_barrier {
+                    if let Some(barrier) = inner
+                        .task_start_barriers
+                        .get(usize::try_from(stop_barrier.0.get() - 1).unwrap())
+                    {
+                        if barrier.num_tasks == barrier.num_tasks_started {
+                            if inner
+                                .tasks
+                                .iter()
+                                .all(|task| matches!(task.state, TaskState::Finished))
+                            {
+                                break;
+                            }
+                        }
+                    }
+                }
+                drop(guard);
             }
-            drop(guard);
 
             notified.await;
         }
@@ -495,7 +525,7 @@ impl RandomTaskSelector {
             TaskState::Pending { .. }
             | TaskState::WaitingAtStartBarrier { .. }
             | TaskState::Unschedulable { .. }
-            | TaskState::Running
+            | TaskState::Running { .. }
             | TaskState::Finished => false,
         }
     }

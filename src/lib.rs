@@ -111,6 +111,7 @@ pub async fn task_join<T>(name: &str, inner: impl Future<Output = T>) -> T {
     res
 }
 
+#[derive(Clone)]
 pub struct SchedulerHandle(Arc<Scheduler>);
 
 pub fn new_scheduler() -> SchedulerHandle {
@@ -119,17 +120,47 @@ pub fn new_scheduler() -> SchedulerHandle {
     )))
 }
 
+impl SchedulerHandle {
+    pub fn register_task_start_barrier(&self, name: &str, num_tasks: usize) -> TaskStartBarrierId {
+        self.0.register_task_start_barrier(name, num_tasks)
+    }
+
+    pub fn register_task(
+        &self,
+        name: &str,
+        start_barrier: Option<TaskStartBarrierId>,
+    ) -> RegisteredTaskId {
+        let task_id = self.0.register_task(name, start_barrier);
+        RegisteredTaskId(Some((self.0.clone(), task_id)))
+    }
+
+    pub async fn run_control_loop(self, stop_barrier: Option<TaskStartBarrierId>) {
+        self.0.run_control_loop(stop_barrier).await;
+    }
+
+    pub fn get_trace(&self) -> Trace {
+        self.0.get_trace()
+    }
+}
+
 pub async fn execute<T, Fut>(scheduler: SchedulerHandle, inner: Fut) -> (Trace, RunResult<T>)
 where
     Fut: Future<Output = T> + Sized,
 {
     let res = RunAlong {
         main_fut: executor::run(scheduler.0.clone(), inner),
-        aux_fut: scheduler.0.run_control_loop().fuse(),
+        aux_fut: scheduler.0.run_control_loop(None).fuse(),
     }
     .await;
     let trace = scheduler.0.get_trace();
     (trace, res)
+}
+
+pub fn with_scheduler<Fut>(scheduler: SchedulerHandle, inner: Fut) -> WithScheduler<Fut> {
+    WithScheduler {
+        scheduler: scheduler.0,
+        inner,
+    }
 }
 
 #[pin_project]
@@ -181,4 +212,21 @@ pub struct PanicInfo {
     pub message: String,
     pub location: String,
     pub backtrace: String,
+}
+
+#[pin_project]
+pub struct WithScheduler<Fut> {
+    scheduler: Arc<Scheduler>,
+    #[pin]
+    inner: Fut,
+}
+
+impl<Fut: Future> Future for WithScheduler<Fut> {
+    type Output = Fut::Output;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let _guard = this.scheduler.set_current();
+        this.inner.poll(cx)
+    }
 }
