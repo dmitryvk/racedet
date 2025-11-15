@@ -6,7 +6,7 @@ use std::{
 
 use axum::{
     Json, Router,
-    extract::{Request, State},
+    extract::{Path, Request, State},
     response::Response,
     routing::{get, post},
 };
@@ -23,17 +23,23 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+    let scheduler_registry = SchedulerRegistry::new();
     // build our application with a route
     let app = Router::new()
         // `GET /` goes to `root`
         .route("/", get(root))
         .route("/reset", post(reset_counter))
+        .route(
+            "/retrieve_concchecker_trace/{trace_id}",
+            post(retrieve_concchecker_trace),
+        )
         .route("/increment", get(increment))
         // `POST /users` goes to `create_user`
         .route("/users", post(create_user))
-        .layer(ConcCheckerLayer::new())
+        .layer(ConcCheckerLayer::new(scheduler_registry.clone()))
         .with_state(Arc::new(AppState {
             var: AtomicU64::new(0),
+            scheduler_registry,
         }));
 
     // run our app with hyper, listening globally on port 3000
@@ -43,11 +49,27 @@ async fn main() {
 
 struct AppState {
     var: AtomicU64,
+    scheduler_registry: Arc<SchedulerRegistry>,
 }
 
 // basic handler that responds with a static string
 async fn reset_counter(State(state): State<Arc<AppState>>) {
     state.var.store(0, std::sync::atomic::Ordering::Relaxed);
+}
+
+// basic handler that responds with a static string
+async fn retrieve_concchecker_trace(
+    State(state): State<Arc<AppState>>,
+    Path(scheduler_id): Path<String>,
+) -> Result<String, (StatusCode, String)> {
+    if let Some(scheduler) = state.scheduler_registry.take_scheduler(&scheduler_id) {
+        Ok(format!("{}", scheduler.get_trace()))
+    } else {
+        Err((
+            StatusCode::NOT_FOUND,
+            format!("scheduler {scheduler_id} not found"),
+        ))
+    }
 }
 
 // basic handler that responds with a static string
@@ -104,17 +126,23 @@ struct ConcCheckerLayer {
 }
 
 impl ConcCheckerLayer {
-    fn new() -> Self {
+    fn new(scheduler_registry: Arc<SchedulerRegistry>) -> Self {
         ConcCheckerLayer {
-            schedulers: Arc::new(SchedulerRegistry {
-                schedulers: Mutex::new(HashMap::new()),
-            }),
+            schedulers: scheduler_registry,
         }
     }
 }
 
 struct SchedulerRegistry {
     schedulers: Mutex<HashMap<String, (SchedulerHandle, TaskStartBarrierId)>>,
+}
+
+impl SchedulerRegistry {
+    fn new() -> Arc<Self> {
+        Arc::new(SchedulerRegistry {
+            schedulers: Mutex::new(HashMap::new()),
+        })
+    }
 }
 
 impl<S> Layer<S> for ConcCheckerLayer {
@@ -210,6 +238,12 @@ impl FromStr for RequestConccheckerHeader {
 struct RequestConccheckerHeaderParseError;
 
 impl SchedulerRegistry {
+    fn take_scheduler(&self, id: &str) -> Option<SchedulerHandle> {
+        let mut schedulers = self.schedulers.lock().unwrap();
+        let (scheduler, _) = schedulers.remove(id)?;
+        Some(scheduler)
+    }
+
     fn get_or_insert(
         self: &Arc<Self>,
         id: String,
@@ -227,7 +261,6 @@ impl SchedulerRegistry {
                 let barrier = scheduler.register_task_start_barrier("http requests", task_count);
                 let id = entry.key().clone();
                 tokio::spawn({
-                    let registry = self.clone();
                     let scheduler = scheduler.clone();
                     async move {
                         scheduler.clone().run_control_loop(Some(barrier)).await;
@@ -236,8 +269,6 @@ impl SchedulerRegistry {
                             "conchecker scheduler {id} complete. trace:\n{}",
                             scheduler.get_trace()
                         );
-
-                        registry.schedulers.lock().unwrap().remove(&id);
                     }
                 });
                 let (scheduler, barrier) = entry.insert((scheduler, barrier));
