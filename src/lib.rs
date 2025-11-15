@@ -120,6 +120,10 @@ pub fn new_scheduler() -> SchedulerHandle {
     )))
 }
 
+pub fn current_scheduler() -> Option<SchedulerHandle> {
+    Scheduler::current().map(SchedulerHandle)
+}
+
 impl SchedulerHandle {
     pub fn register_task_start_barrier(&self, name: &str, num_tasks: usize) -> TaskStartBarrierId {
         self.0.register_task_start_barrier(name, num_tasks)
@@ -158,7 +162,17 @@ where
 
 pub fn with_scheduler<Fut>(scheduler: SchedulerHandle, inner: Fut) -> WithScheduler<Fut> {
     WithScheduler {
-        scheduler: scheduler.0,
+        scheduler: Some(scheduler.0),
+        inner,
+    }
+}
+
+pub fn maybe_with_scheduler<Fut>(
+    scheduler: Option<SchedulerHandle>,
+    inner: Fut,
+) -> WithScheduler<Fut> {
+    WithScheduler {
+        scheduler: scheduler.map(|handle| handle.0),
         inner,
     }
 }
@@ -216,7 +230,7 @@ pub struct PanicInfo {
 
 #[pin_project]
 pub struct WithScheduler<Fut> {
-    scheduler: Arc<Scheduler>,
+    scheduler: Option<Arc<Scheduler>>,
     #[pin]
     inner: Fut,
 }
@@ -226,7 +240,10 @@ impl<Fut: Future> Future for WithScheduler<Fut> {
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let _guard = this.scheduler.set_current();
+        let _guard;
+        if let Some(scheduler) = &this.scheduler {
+            _guard = scheduler.set_current();
+        }
         this.inner.poll(cx)
     }
 }
