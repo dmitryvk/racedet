@@ -370,7 +370,6 @@ impl Scheduler {
 
     pub(crate) async fn run_control_loop(&self, stop_barrier: Option<TaskStartBarrierId>) {
         tracing::debug!("run control loop started");
-        // TODO: stop when all finished (optionally)
         loop {
             let mut notified = pin!(self.scheduler_notify.notified());
             notified.as_mut().enable();
