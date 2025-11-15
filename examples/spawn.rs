@@ -4,11 +4,9 @@ use conc_checker::{
     current_scheduler, execute, maybe_with_scheduler, new_scheduler, register_task_start_barrier,
 };
 use conc_checker::{execution_point, register_task, task, task_join};
-use futures::FutureExt;
-use futures::select;
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
+use tokio::join;
 use tokio::spawn;
-use tokio::{join, time::sleep};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 

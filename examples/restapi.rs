@@ -214,11 +214,11 @@ impl FromStr for RequestConccheckerHeader {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let (n, s) = s
             .split_once('-')
-            .ok_or_else(|| RequestConccheckerHeaderParseError)?;
+            .ok_or(RequestConccheckerHeaderParseError)?;
         let n: usize = n.parse().map_err(|_| RequestConccheckerHeaderParseError)?;
         let (scheduler_id, task_id) = s
             .split_once('-')
-            .ok_or_else(|| RequestConccheckerHeaderParseError)?;
+            .ok_or(RequestConccheckerHeaderParseError)?;
         if scheduler_id.is_empty() || !scheduler_id.chars().all(char::is_alphanumeric) {
             return Err(RequestConccheckerHeaderParseError);
         }
