@@ -1,8 +1,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use conc_checker::locks::LockOperation;
 use conc_checker::{
-    RunResult, execute, execution_point_with_locks, new_scheduler, register_task_start_barrier,
+    RunResult, execute, execution_point_with_sync, new_scheduler, register_task_start_barrier,
 };
 use conc_checker::{execution_point, register_task, task};
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
@@ -53,19 +54,27 @@ async fn foo() {
 }
 
 async fn do_read(var: Arc<RwLock<i32>>) {
-    execution_point_with_locks("before read-lock", vec!["var".to_string()], &[]).await;
+    execution_point_with_sync("take read-lock", LockOperation::Acquire("var".to_string())).await;
     let guard = var.read().await;
-    execution_point("read-locked").await;
+    execution_point("operation under lock").await;
+    execution_point_with_sync(
+        "release read-lock",
+        LockOperation::Release("var".to_string()),
+    )
+    .await;
     drop(guard);
-    execution_point_with_locks("unlocked", vec![], &["var".to_string()]).await;
 }
 
 async fn do_write(var: Arc<RwLock<i32>>) {
-    execution_point_with_locks("before write-lock", vec!["var".to_string()], &[]).await;
+    execution_point_with_sync("take write-lock", LockOperation::Acquire("var".to_string())).await;
     let mut guard = var.write().await;
     execution_point("write-locked").await;
     let val = &mut *guard;
     *val += 1;
+    execution_point_with_sync(
+        "release write-lock",
+        LockOperation::Release("var".to_string()),
+    )
+    .await;
     drop(guard);
-    execution_point_with_locks("unlocked", vec![], &["var".to_string()]).await;
 }
