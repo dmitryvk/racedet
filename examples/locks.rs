@@ -45,10 +45,10 @@ async fn foo() {
     let var = Arc::new(RwLock::new(1));
 
     join!(
-        task(register_task("task r1", barrier), do_read(var.clone())),
-        task(register_task("task r2", barrier), do_read(var.clone())),
-        task(register_task("task w1", barrier), do_write(var.clone())),
-        task(register_task("task w2", barrier), do_write(var.clone())),
+        task(register_task("r1", barrier), do_read(var.clone())),
+        task(register_task("r2", barrier), do_read(var.clone())),
+        task(register_task("w1", barrier), do_write(var.clone())),
+        task(register_task("w2", barrier), do_write(var.clone())),
     );
 
     assert_eq!(3, *var.read().await);
