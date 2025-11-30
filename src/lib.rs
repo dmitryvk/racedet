@@ -8,12 +8,16 @@ use crate::{
     scheduler::{RandomTaskSelector, Scheduler},
 };
 mod executor;
+mod locks;
 mod scheduler;
+
+pub use locks::SyncDomain;
+pub use locks::SyncOperation;
 
 #[derive(Clone)]
 pub struct RegisteredTaskId(Option<(Arc<Scheduler>, TaskId)>);
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct TaskId(NonZeroU64);
 
 #[derive(Clone, Copy, Debug)]
@@ -39,22 +43,16 @@ pub async fn execution_point(name: &str) {
     if let Some(scheduler) = Scheduler::current()
         && let Some(task_id) = executor::current_task()
     {
-        scheduler
-            .on_reached_point(task_id, name, Vec::new(), &[])
-            .await;
+        scheduler.on_reached_point(task_id, name, None).await;
     }
 }
 
-pub async fn execution_point_with_locks(
-    name: &str,
-    acquire_locks: Vec<String>,
-    release_locks: &[String],
-) {
+pub async fn execution_point_with_sync<O: SyncOperation>(name: &str, operation: O) {
     if let Some(scheduler) = Scheduler::current()
         && let Some(task_id) = executor::current_task()
     {
         scheduler
-            .on_reached_point(task_id, name, acquire_locks, release_locks)
+            .on_reached_point(task_id, name, Some(operation))
             .await;
     }
 }
@@ -245,5 +243,11 @@ impl<Fut: Future> Future for WithScheduler<Fut> {
             _guard = scheduler.set_current();
         }
         this.inner.poll(cx)
+    }
+}
+
+impl std::fmt::Display for TaskId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }

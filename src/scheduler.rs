@@ -9,7 +9,10 @@ use std::{
 
 use itertools::Itertools;
 
-use crate::{TaskId, TaskStartBarrierId, Trace};
+use crate::{
+    TaskId, TaskStartBarrierId, Trace,
+    locks::{ErasedLocks, LockOperation},
+};
 
 thread_local! {
     static CURRENT_SCHEDULER: RefCell<Option<Arc<Scheduler>>> = const { RefCell::new(None) };
@@ -27,7 +30,7 @@ struct Inner {
     task_selector: TaskSelector,
     tasks: Vec<Task>,
     task_start_barriers: Vec<TaskStartBarrier>,
-    locks_held: HashSet<String>,
+    locks: ErasedLocks,
     trace: Vec<(TaskId, String)>,
 }
 
@@ -36,7 +39,6 @@ pub(crate) struct Task {
     name: String,
     prev_suspend_point: Option<String>,
     state: TaskState,
-    locks_held: HashSet<String>,
 }
 
 pub(crate) struct TaskStartBarrier {
@@ -95,7 +97,7 @@ impl Scheduler {
                 task_selector,
                 tasks: Vec::new(),
                 task_start_barriers: Vec::new(),
-                locks_held: HashSet::new(),
+                locks: ErasedLocks::new(),
                 trace: Vec::new(),
             }),
             scheduler_notify: tokio::sync::Notify::new(),
@@ -156,7 +158,6 @@ impl Scheduler {
             name: name.to_string(),
             prev_suspend_point: None,
             state: TaskState::Pending { start_barrier },
-            locks_held: HashSet::new(),
         });
         id
     }
@@ -233,14 +234,15 @@ impl Scheduler {
         &self,
         task_id: TaskId,
         name: &str,
-        acquire_locks: Vec<String>,
-        release_locks: &[String],
+        sync_operation: 
+        acquire_lock: Option<String>,
+        release_lock: Option<&str>,
     ) {
-        if acquire_locks.is_empty() && release_locks.is_empty() {
+        if acquire_lock.is_none() && release_lock.is_none() {
             tracing::debug!("reached point {task_id:?} {name}");
         } else {
             tracing::debug!(
-                "reached point {task_id:?} {name} with acquire_locks={acquire_locks:?} release_locks={release_locks:?}"
+                "reached point {task_id:?} {name} with acquire_locks={acquire_lock:?} release_locks={release_lock:?}"
             );
         }
         {
@@ -265,7 +267,10 @@ impl Scheduler {
                 );
                 }
             }
-            for lock in release_locks {
+            for lock in release_lock {
+                let lock = LockOperation::Release(lock.to_string());
+                inner.locks.before_wait(task_id, &lock);
+                inner.locks.wait_completed(task.id, &lock);
                 assert!(task.locks_held.contains(lock));
                 assert!(inner.locks_held.contains(lock));
                 task.locks_held.remove(lock);
@@ -273,7 +278,7 @@ impl Scheduler {
             }
             task.state = TaskState::ReadyAtPoint {
                 point: name.to_string(),
-                waiting_for_locks: acquire_locks,
+                waiting_for_locks: acquire_lock,
             };
             drop(guard);
         }
