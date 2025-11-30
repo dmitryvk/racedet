@@ -39,6 +39,7 @@ impl ErasedSyncState {
             .lock_states
             .entry(type_id)
             .or_insert_with(|| Box::new(T::State::default()));
+
         BoxDynSyncOperation {
             state_type: type_id,
             operation: Box::new(operation),
@@ -49,12 +50,14 @@ impl ErasedSyncState {
         self.lock_states
             .get(&type_id)
             .expect("did not find lock state")
+            .as_ref()
     }
 
     fn get_state_mut(&mut self, type_id: TypeId) -> &mut dyn Any {
         self.lock_states
             .get_mut(&type_id)
             .expect("did not find lock state")
+            .as_mut()
     }
 
     pub fn is_task_runnable(&self, task_id: TaskId, operation: &BoxDynSyncOperation) -> bool {
