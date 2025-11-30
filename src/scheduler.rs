@@ -36,7 +36,7 @@ struct Inner {
 pub(crate) struct Task {
     id: TaskId,
     name: String,
-    prev_suspend_point: Option<String>,
+    prev_suspend_point: String,
     state: TaskState,
 }
 
@@ -155,7 +155,7 @@ impl Scheduler {
         inner.tasks.push(Task {
             id,
             name: name.to_string(),
-            prev_suspend_point: None,
+            prev_suspend_point: "(start)".to_string(),
             state: TaskState::Pending { start_barrier },
         });
         id
@@ -224,7 +224,9 @@ impl Scheduler {
         let inner = &mut *guard;
         let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
         task.state = TaskState::Finished;
-        inner.trace.push((task.id, "finished".to_string()));
+        inner
+            .trace
+            .push((task.id, format!("[{}->finish)", task.prev_suspend_point)));
         drop(guard);
         self.scheduler_notify.notify_waiters();
     }
@@ -247,7 +249,9 @@ impl Scheduler {
             let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
             match &task.state {
                 TaskState::Running => {
-                    inner.trace.push((task.id, format!("->{name}")));
+                    inner
+                        .trace
+                        .push((task.id, format!("[{}->{name})", task.prev_suspend_point)));
                 }
                 TaskState::Pending { .. }
                 | TaskState::WaitingAtStartBarrier { .. }
@@ -289,7 +293,10 @@ impl Scheduler {
         let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
         match &task.state {
             TaskState::Running => {
-                inner.trace.push((task.id, format!("->{name}...")));
+                inner.trace.push((
+                    task.id,
+                    format!("[{}->{name}:start (and running)", task.prev_suspend_point),
+                ));
             }
             TaskState::Pending { .. }
             | TaskState::WaitingAtStartBarrier { .. }
@@ -303,6 +310,7 @@ impl Scheduler {
                 );
             }
         }
+        task.prev_suspend_point = name.to_string();
         task.state = TaskState::Unschedulable {
             interval_name: name.to_string(),
         };
@@ -331,7 +339,10 @@ impl Scheduler {
                     );
                 }
             };
-            inner.trace.push((task.id, format!("->{interval_name}")));
+            inner.trace.push((
+                task.id,
+                format!("[{interval_name}:start->{interval_name}:end)"),
+            ));
             task.state = TaskState::ReadyAtPoint {
                 point: interval_name.clone(),
                 sync_operation: None,
@@ -406,27 +417,34 @@ impl Scheduler {
                         .choose_next_running_task(&inner.tasks, &inner.locks)
                     {
                         let task = inner.tasks.get_mut(next_running).unwrap();
-                        task.prev_suspend_point =
-                            match mem::replace(&mut task.state, TaskState::Running) {
-                                TaskState::ReadyAtPoint {
-                                    point,
-                                    sync_operation,
-                                } => {
-                                    if let Some(sync_operation) = sync_operation {
-                                        inner
-                                            .locks
-                                            .task_selected_for_running(task.id, &sync_operation)
-                                            .expect("usage should be correct");
-                                    }
-                                    inner.trace.push((task.id, format!("{}->", point)));
-                                    Some(point)
+                        task.prev_suspend_point = match mem::replace(
+                            &mut task.state,
+                            TaskState::Running,
+                        ) {
+                            TaskState::ReadyAtPoint {
+                                point,
+                                sync_operation,
+                            } => {
+                                if let Some(sync_operation) = sync_operation {
+                                    inner
+                                        .locks
+                                        .task_selected_for_running(task.id, &sync_operation)
+                                        .expect("usage should be correct");
                                 }
-                                TaskState::ReadyAtStart => {
-                                    inner.trace.push((task.id, "start->".to_string()));
-                                    None
-                                }
-                                _ => None,
-                            };
+                                point
+                            }
+                            TaskState::ReadyAtStart => "start".to_string(),
+                            TaskState::Pending { .. }
+                            | TaskState::WaitingAtStartBarrier { .. }
+                            | TaskState::Unschedulable { .. }
+                            | TaskState::Running
+                            | TaskState::Finished => {
+                                panic!(
+                                    "task {} {} is selected to run, but its state was not ReadyAtPoint/ReadyAtStart, but rather is {:?}. This is an internal error in conc-checker.",
+                                    task.id.0, task.name, task.state
+                                );
+                            }
+                        };
                         tracing::debug!("switching to task {:?}", task.id);
                         self.task_notify.notify_waiters();
                     } else {

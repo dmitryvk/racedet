@@ -41,7 +41,11 @@ async fn foo() {
             .await
         })
         .collect();
-    let mut results: Vec<_> = task_join("fut_unordered_collect", futs.collect()).await;
+    let mut results: Vec<_> = task(
+        register_task("main", None),
+        task_join("fut_unordered_collect", futs.collect()),
+    )
+    .await;
     results.sort();
     assert_eq!(results, (0..512).collect::<Vec<_>>());
 }

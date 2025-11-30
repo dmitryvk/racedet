@@ -23,6 +23,10 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+
+    // use the following script to execute the example:
+    // curl http://localhost:3000/reset -X POST && curl http://localhost:3000/increment -H 'x-concchecker: 2-foo-r1' & curl http://localhost:3000/increment -H 'x-concchecker: 2-foo-r2' & wait; curl http://localhost:3000/retrieve_concchecker_trace/foo -X POST
+
     let scheduler_registry = SchedulerRegistry::new();
     // build our application with a route
     let app = Router::new()
@@ -74,21 +78,17 @@ async fn retrieve_concchecker_trace(
 
 // basic handler that responds with a static string
 // #[axum::debug_handler]
-async fn root(State(state): State<Arc<AppState>>) -> &'static str {
-    execution_point("before load").await;
-    let x = state.var.load(std::sync::atomic::Ordering::Relaxed);
-    execution_point("after load").await;
-    state.var.store(x + 1, std::sync::atomic::Ordering::Relaxed);
+async fn root() -> &'static str {
     "Hello, World!"
 }
 
 // basic handler that responds with a static string
 async fn increment(State(state): State<Arc<AppState>>) -> String {
-    execution_point("before load").await;
+    execution_point("load").await;
     let x = state.var.load(std::sync::atomic::Ordering::Relaxed);
-    execution_point("after load").await;
+    execution_point("store").await;
     state.var.store(x + 1, std::sync::atomic::Ordering::Relaxed);
-    format!("new value: {}", x + 1)
+    format!("new value: {}\n", x + 1)
 }
 
 async fn create_user(

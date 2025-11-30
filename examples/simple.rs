@@ -27,8 +27,8 @@ async fn foo() {
 }
 
 async fn bar(var: Arc<AtomicI64>) {
-    execution_point("before load").await;
+    execution_point("load").await;
     let x = var.load(std::sync::atomic::Ordering::Relaxed);
-    execution_point("after load").await;
+    execution_point("store").await;
     var.store(x + 1, std::sync::atomic::Ordering::Relaxed);
 }

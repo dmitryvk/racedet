@@ -61,7 +61,7 @@ async fn do_read(var: Arc<RwLock<i32>>) {
     )
     .await;
     let guard = var.read().await;
-    execution_point("operation under read-lock").await;
+    execution_point("read var").await;
     execution_point_with_sync(
         "release read-lock",
         RwlockOperation::Release("var".to_string()),
@@ -77,7 +77,7 @@ async fn do_write(var: Arc<RwLock<i32>>) {
     )
     .await;
     let mut guard = var.write().await;
-    execution_point("operation write read-lock").await;
+    execution_point("modify var").await;
     let val = &mut *guard;
     *val += 1;
     execution_point_with_sync(
