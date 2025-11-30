@@ -8,10 +8,10 @@ use crate::{
     scheduler::{RandomTaskSelector, Scheduler},
 };
 mod executor;
-pub mod locks;
+pub mod lock_model;
 mod scheduler;
 
-pub use locks::SyncOperation;
+pub use lock_model::SyncOperation;
 
 #[derive(Clone)]
 pub struct RegisteredTaskId(Option<(Arc<Scheduler>, TaskId)>);
@@ -43,7 +43,7 @@ pub async fn execution_point(name: &str) {
         && let Some(task_id) = executor::current_task()
     {
         scheduler
-            .on_reached_point(task_id, name, None::<locks::Noop>)
+            .on_reached_point(task_id, name, None::<lock_model::Noop>)
             .await;
     }
 }

@@ -10,7 +10,7 @@ use itertools::Itertools;
 
 use crate::{
     SyncOperation, TaskId, TaskStartBarrierId, Trace,
-    locks::{BoxDynSyncOperation, ErasedSyncState},
+    lock_model::{BoxDynSyncOperation, ErasedSyncState},
 };
 
 thread_local! {

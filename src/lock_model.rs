@@ -14,6 +14,9 @@
 //! `SyncOperation` implementations are backed by `SyncDomain` which tracks the necessary state
 //! (e.g., which tasks are holding locks or trying to acquire them).
 
+pub mod mutex;
+pub mod rwlock;
+
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -159,54 +162,5 @@ impl SyncOperation for Noop {
         _task: TaskId,
     ) -> Result<(), BadSyncError> {
         Ok(())
-    }
-}
-
-#[derive(Default)]
-pub struct InMemoryLocks {
-    lock_held_by: HashMap<String, TaskId>,
-}
-
-#[derive(Debug)]
-pub enum LockOperation {
-    Acquire(String),
-    Release(String),
-}
-
-impl SyncOperation for LockOperation {
-    type State = InMemoryLocks;
-
-    fn is_task_runnable(&self, state: &Self::State, _task: TaskId) -> bool {
-        match self {
-            LockOperation::Acquire(lock_id) => !state.lock_held_by.contains_key(lock_id),
-            LockOperation::Release(_) => true,
-        }
-    }
-
-    fn task_selected_for_running(
-        &self,
-        state: &mut Self::State,
-        task: TaskId,
-    ) -> Result<(), BadSyncError> {
-        match self {
-            LockOperation::Acquire(lock_id) => {
-                let was_held_by = state.lock_held_by.insert(lock_id.clone(), task);
-                if let Some(was_held_by) = was_held_by {
-                    Err(BadSyncError(format!("lock is held by task {was_held_by}")))
-                } else {
-                    Ok(())
-                }
-            }
-            LockOperation::Release(lock_id) => {
-                let was_held_by = state.lock_held_by.remove(lock_id);
-                if was_held_by != Some(task) {
-                    Err(BadSyncError(format!(
-                        "lock was not held by {task} but rather {was_held_by:?}"
-                    )))
-                } else {
-                    Ok(())
-                }
-            }
-        }
     }
 }

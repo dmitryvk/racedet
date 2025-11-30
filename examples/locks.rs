@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use conc_checker::locks::LockOperation;
+use conc_checker::lock_model::rwlock::RwlockOperation;
 use conc_checker::{
     RunResult, execute, execution_point_with_sync, new_scheduler, register_task_start_barrier,
 };
@@ -40,40 +40,49 @@ async fn main() {
 async fn foo() {
     execution_point("before").await;
 
-    let barrier = register_task_start_barrier("start", 3);
+    let barrier = register_task_start_barrier("start", 4);
 
     let var = Arc::new(RwLock::new(1));
 
     join!(
-        task(register_task("task 1", barrier), do_read(var.clone())),
-        task(register_task("task 2", barrier), do_write(var.clone())),
-        task(register_task("task 3", barrier), do_write(var.clone())),
+        task(register_task("task r1", barrier), do_read(var.clone())),
+        task(register_task("task r2", barrier), do_read(var.clone())),
+        task(register_task("task w1", barrier), do_write(var.clone())),
+        task(register_task("task w2", barrier), do_write(var.clone())),
     );
 
     assert_eq!(3, *var.read().await);
 }
 
 async fn do_read(var: Arc<RwLock<i32>>) {
-    execution_point_with_sync("take read-lock", LockOperation::Acquire("var".to_string())).await;
+    execution_point_with_sync(
+        "take read-lock",
+        RwlockOperation::AcquireRead("var".to_string()),
+    )
+    .await;
     let guard = var.read().await;
-    execution_point("operation under lock").await;
+    execution_point("operation under read-lock").await;
     execution_point_with_sync(
         "release read-lock",
-        LockOperation::Release("var".to_string()),
+        RwlockOperation::Release("var".to_string()),
     )
     .await;
     drop(guard);
 }
 
 async fn do_write(var: Arc<RwLock<i32>>) {
-    execution_point_with_sync("take write-lock", LockOperation::Acquire("var".to_string())).await;
+    execution_point_with_sync(
+        "take write-lock",
+        RwlockOperation::AcquireWrite("var".to_string()),
+    )
+    .await;
     let mut guard = var.write().await;
-    execution_point("write-locked").await;
+    execution_point("operation write read-lock").await;
     let val = &mut *guard;
     *val += 1;
     execution_point_with_sync(
         "release write-lock",
-        LockOperation::Release("var".to_string()),
+        RwlockOperation::Release("var".to_string()),
     )
     .await;
     drop(guard);
