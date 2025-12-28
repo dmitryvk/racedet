@@ -5,6 +5,9 @@ use std::{
 
 use crate::TaskId;
 
+pub mod mutex;
+pub mod rwlock;
+
 pub(crate) struct SyncModelRegistry {
     sync_models: HashMap<TypeId, Box<dyn DynSyncModel>>,
 }
