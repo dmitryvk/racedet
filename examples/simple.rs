@@ -4,14 +4,10 @@ use conc_checker::{
     execute, execution_point, new_scheduler, register_task, register_task_start_barrier, task,
 };
 use tokio::join;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .with(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    tracing_subscriber::fmt::init();
     let (trace, res) = execute(new_scheduler(), foo()).await;
     println!("{res:?}");
     println!("{trace}");

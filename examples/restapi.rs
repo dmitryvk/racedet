@@ -15,14 +15,10 @@ use futures::{FutureExt, future::BoxFuture};
 use hyper::StatusCode;
 use serde::{Deserialize, Serialize};
 use tower::{Layer, Service};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .with(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    tracing_subscriber::fmt::init();
 
     // use the following script to execute the example:
     // curl http://localhost:3000/reset -X POST && curl http://localhost:3000/increment -H 'x-concchecker: 2-foo-r1' & curl http://localhost:3000/increment -H 'x-concchecker: 2-foo-r2' & wait; curl http://localhost:3000/retrieve_concchecker_trace/foo -X POST
