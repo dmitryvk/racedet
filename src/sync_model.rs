@@ -52,13 +52,13 @@ impl SyncModelRegistry {
     }
 }
 
-trait DynSyncModel: Any + Send + Sync + 'static {
+pub(crate) trait DynSyncModel: Any + Send + Sync + 'static {
     fn task_progress_dependencies(&self, task_id: TaskId) -> TaskProgressDependencies;
 }
 
-trait SyncModel: DynSyncModel + Default {}
+pub(crate) trait SyncModel: DynSyncModel + Default {}
 
-trait ProcessSyncEvent<TOp: SyncEvent>: SyncModel {
+pub(crate) trait ProcessSyncEvent<TOp: SyncEvent>: SyncModel {
     fn on_notified(
         &mut self,
         task_id: TaskId,
@@ -77,7 +77,7 @@ pub(crate) enum NotificationOutcome {
     ScheduleRequired,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TaskProgressDependencies {
     /// The task is ready to be resumed, but it needs other tasks to be running at the same time (due to being driven by them or a cooperative concurrency/synchronization primitive)
     /// Examples:

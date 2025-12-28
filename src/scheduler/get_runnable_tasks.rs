@@ -5,6 +5,7 @@ use crate::{
     sync_model::{SyncModelRegistry, TaskProgressDependencies},
 };
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TasksToRun {
     chosen_task: Option<TaskId>,
     to_run: HashSet<TaskId>,
@@ -18,12 +19,13 @@ pub(crate) fn get_runnable_tasks(
     let mut has_ready = false;
     let mut need_to_run = HashSet::new();
     for task_id in &running_tasks {
-        let deps = sync.task_progress_dependencies(*task_id);
-        match deps {
-            TaskProgressDependencies::Ready { .. } => {
+        match task_transitive_deps(sync, *task_id) {
+            TaskProgressDependencies::Ready {
+                need_to_run: cur_transitive_need_to_run,
+            } => {
                 has_ready = true;
                 need_to_run.extend(
-                    task_transitive_deps(sync, *task_id)
+                    cur_transitive_need_to_run
                         .into_iter()
                         .filter(|task_id| !running_tasks.contains(task_id)),
                 );
@@ -42,9 +44,9 @@ pub(crate) fn get_runnable_tasks(
     let mut seen_task_sets = HashSet::<BTreeSet<TaskId>>::new();
     let mut result = Vec::new();
     for &task_id in &suspended_tasks {
-        match sync.task_progress_dependencies(task_id) {
-            TaskProgressDependencies::Ready { .. } => {
-                let deps: HashSet<TaskId> = task_transitive_deps(sync, task_id)
+        match task_transitive_deps(sync, task_id) {
+            TaskProgressDependencies::Ready { need_to_run } => {
+                let deps: HashSet<TaskId> = need_to_run
                     .into_iter()
                     .filter(|task_id| !running_tasks.contains(&task_id))
                     .collect();
@@ -52,7 +54,7 @@ pub(crate) fn get_runnable_tasks(
                     result.push(TasksToRun {
                         chosen_task: Some(task_id),
                         to_run: deps,
-                    })
+                    });
                 }
             }
             TaskProgressDependencies::Blocked => {}
@@ -62,23 +64,287 @@ pub(crate) fn get_runnable_tasks(
     result
 }
 
-fn task_transitive_deps(sync: &SyncModelRegistry, task_id: TaskId) -> HashSet<TaskId> {
-    let mut visited = HashSet::new();
-    let mut stack = Vec::new();
-    stack.push(task_id);
-    visited.insert(task_id);
-    while let Some(cur_task_id) = stack.pop() {
-        match sync.task_progress_dependencies(cur_task_id) {
-            TaskProgressDependencies::Ready { need_to_run } => {
-                for next_task in need_to_run {
-                    if visited.insert(next_task) {
-                        stack.push(next_task);
+fn task_transitive_deps(sync: &SyncModelRegistry, task_id: TaskId) -> TaskProgressDependencies {
+    match sync.task_progress_dependencies(task_id) {
+        TaskProgressDependencies::Ready { .. } => {
+            let mut visited = HashSet::new();
+            let mut stack = Vec::new();
+            stack.push(task_id);
+            visited.insert(task_id);
+            while let Some(cur_task_id) = stack.pop() {
+                match sync.task_progress_dependencies(cur_task_id) {
+                    TaskProgressDependencies::Ready { need_to_run } => {
+                        for next_task in need_to_run {
+                            if visited.insert(next_task) {
+                                stack.push(next_task);
+                            }
+                        }
                     }
+                    TaskProgressDependencies::Blocked => {}
                 }
             }
-            TaskProgressDependencies::Blocked => {}
+            TaskProgressDependencies::Ready {
+                need_to_run: visited,
+            }
+        }
+        TaskProgressDependencies::Blocked => TaskProgressDependencies::Blocked,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, num::NonZeroU64};
+
+    use itertools::Itertools;
+
+    use crate::sync_model::{
+        BadSyncError, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
+    };
+
+    use super::*;
+
+    #[test]
+    fn ready_running() {
+        let sync_registry = SyncModelRegistry::new();
+        let task_ids = (1..=2)
+            .map(|i| TaskId(NonZeroU64::new(i).unwrap()))
+            .collect_vec();
+        let choices = get_runnable_tasks(
+            [task_ids[0]].into_iter().collect(),
+            [task_ids[1]].into_iter().collect(),
+            &sync_registry,
+        );
+        assert_eq!(
+            choices,
+            vec![TasksToRun {
+                chosen_task: None,
+                to_run: HashSet::new()
+            }]
+        );
+    }
+
+    #[test]
+    fn deps_for_ready_running() {
+        let mut sync_registry = SyncModelRegistry::new();
+        let task_ids = (1..=4)
+            .map(|i| TaskId(NonZeroU64::new(i).unwrap()))
+            .collect_vec();
+        sync_registry
+            .on_notified(
+                task_ids[0],
+                ProvideDeps(TaskProgressDependencies::Ready {
+                    need_to_run: [task_ids[1], task_ids[2]].into_iter().collect(),
+                }),
+            )
+            .unwrap();
+        sync_registry
+            .on_notified(task_ids[1], ProvideDeps(TaskProgressDependencies::Blocked))
+            .unwrap();
+        let choices = get_runnable_tasks(
+            [task_ids[0]].into_iter().collect(),
+            [task_ids[1], task_ids[2], task_ids[3]]
+                .into_iter()
+                .collect(),
+            &sync_registry,
+        );
+        assert_eq!(
+            choices,
+            vec![TasksToRun {
+                chosen_task: None,
+                to_run: [task_ids[1], task_ids[2]].into_iter().collect()
+            }]
+        );
+    }
+
+    #[test]
+    fn pick_new_ready_if_no_running() {
+        let mut sync_registry = SyncModelRegistry::new();
+        let task_ids = (1..=4)
+            .map(|i| TaskId(NonZeroU64::new(i).unwrap()))
+            .collect_vec();
+        sync_registry
+            .on_notified(
+                task_ids[0],
+                ProvideDeps(TaskProgressDependencies::Ready {
+                    need_to_run: [task_ids[1], task_ids[2]].into_iter().collect(),
+                }),
+            )
+            .unwrap();
+        sync_registry
+            .on_notified(task_ids[1], ProvideDeps(TaskProgressDependencies::Blocked))
+            .unwrap();
+        let mut choices = get_runnable_tasks(
+            [].into_iter().collect(),
+            [task_ids[0], task_ids[1], task_ids[2], task_ids[3]]
+                .into_iter()
+                .collect(),
+            &sync_registry,
+        );
+
+        choices.sort_by_cached_key(|item| {
+            (
+                item.chosen_task,
+                item.to_run.iter().copied().collect::<BTreeSet<_>>(),
+            )
+        });
+        println!("{choices:#?}");
+        assert_eq!(choices.len(), 3);
+        assert_eq!(
+            choices[0],
+            TasksToRun {
+                chosen_task: Some(task_ids[0]),
+                to_run: [task_ids[0], task_ids[1], task_ids[2]]
+                    .into_iter()
+                    .collect()
+            }
+        );
+        assert_eq!(
+            choices[1],
+            TasksToRun {
+                chosen_task: Some(task_ids[2]),
+                to_run: [task_ids[2]].into_iter().collect()
+            }
+        );
+        assert_eq!(
+            choices[2],
+            TasksToRun {
+                chosen_task: Some(task_ids[3]),
+                to_run: [task_ids[3]].into_iter().collect()
+            }
+        );
+    }
+
+    #[test]
+    fn complex_cases() {
+        let mut sync_registry = SyncModelRegistry::new();
+        let task_ids = (1..=7)
+            .map(|i| TaskId(NonZeroU64::new(i).unwrap()))
+            .collect_vec();
+
+        // normal tasks:
+        // 0: ready
+        sync_registry
+            .on_notified(
+                task_ids[0],
+                ProvideDeps(TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new(),
+                }),
+            )
+            .unwrap();
+        // tokio::join
+        // 1: ready, wait for 2
+        // 2: blocked
+        sync_registry
+            .on_notified(
+                task_ids[1],
+                ProvideDeps(TaskProgressDependencies::Ready {
+                    need_to_run: [task_ids[2]].into_iter().collect(),
+                }),
+            )
+            .unwrap();
+        sync_registry
+            .on_notified(task_ids[2], ProvideDeps(TaskProgressDependencies::Blocked))
+            .unwrap();
+        // wait on mutex
+        // 3: blocked
+        sync_registry
+            .on_notified(task_ids[3], ProvideDeps(TaskProgressDependencies::Blocked))
+            .unwrap();
+        // wait on barrier
+        // 4: ready, wait for 5, 6
+        // 5: ready, wait for 4, 6
+        // 6: ready, wait for 4, 5
+        sync_registry
+            .on_notified(
+                task_ids[4],
+                ProvideDeps(TaskProgressDependencies::Ready {
+                    need_to_run: [task_ids[5], task_ids[6]].into_iter().collect(),
+                }),
+            )
+            .unwrap();
+        sync_registry
+            .on_notified(
+                task_ids[5],
+                ProvideDeps(TaskProgressDependencies::Ready {
+                    need_to_run: [task_ids[4], task_ids[6]].into_iter().collect(),
+                }),
+            )
+            .unwrap();
+        sync_registry
+            .on_notified(
+                task_ids[6],
+                ProvideDeps(TaskProgressDependencies::Ready {
+                    need_to_run: [task_ids[4], task_ids[5]].into_iter().collect(),
+                }),
+            )
+            .unwrap();
+
+        let mut choices = get_runnable_tasks(
+            HashSet::new(),
+            task_ids.iter().copied().collect(),
+            &sync_registry,
+        );
+
+        choices.sort_by_cached_key(|item| {
+            (
+                item.chosen_task,
+                item.to_run.iter().copied().collect::<BTreeSet<_>>(),
+            )
+        });
+
+        println!("{choices:#?}");
+        assert_eq!(choices.len(), 3);
+        assert_eq!(
+            choices[0],
+            TasksToRun {
+                chosen_task: Some(task_ids[0]),
+                to_run: [task_ids[0]].into_iter().collect()
+            }
+        );
+        assert_eq!(
+            choices[1],
+            TasksToRun {
+                chosen_task: Some(task_ids[1]),
+                to_run: [task_ids[1], task_ids[2]].into_iter().collect()
+            }
+        );
+        assert!([task_ids[4], task_ids[5], task_ids[6]].contains(&choices[2].chosen_task.unwrap()));
+        assert_eq!(
+            choices[2].to_run,
+            [task_ids[4], task_ids[5], task_ids[6]]
+                .into_iter()
+                .collect()
+        );
+    }
+
+    #[derive(Debug, Default)]
+    struct TestSyncModel {
+        task_deps: HashMap<TaskId, TaskProgressDependencies>,
+    }
+
+    impl SyncModel for TestSyncModel {}
+    impl DynSyncModel for TestSyncModel {
+        fn task_progress_dependencies(&self, task_id: TaskId) -> TaskProgressDependencies {
+            self.task_deps.get(&task_id).cloned().unwrap_or_else(|| {
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new(),
+                }
+            })
         }
     }
 
-    visited
+    struct ProvideDeps(TaskProgressDependencies);
+    impl SyncEvent for ProvideDeps {
+        type Model = TestSyncModel;
+    }
+    impl ProcessSyncEvent<ProvideDeps> for TestSyncModel {
+        fn on_notified(
+            &mut self,
+            task_id: TaskId,
+            ProvideDeps(deps): ProvideDeps,
+        ) -> Result<NotificationOutcome, BadSyncError> {
+            self.task_deps.insert(task_id, deps);
+            Ok(NotificationOutcome::Acknowledged)
+        }
+    }
 }
