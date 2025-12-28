@@ -14,6 +14,8 @@ use crate::{
     sync_model::{BadSyncError, NotificationOutcome, SyncEvent, SyncModelRegistry},
 };
 
+mod get_runnable_tasks;
+
 thread_local! {
     static CURRENT_SCHEDULER: RefCell<Option<Arc<Scheduler>>> = const { RefCell::new(None) };
 }

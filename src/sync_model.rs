@@ -46,7 +46,9 @@ impl SyncModelRegistry {
         self.iter_models()
             .map(|model| model.task_progress_dependencies(task_id))
             .reduce(TaskProgressDependencies::merge)
-            .unwrap_or_else(|| TaskProgressDependencies::Known(HashSet::new()))
+            .unwrap_or_else(|| TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new(),
+            })
     }
 }
 
@@ -71,30 +73,48 @@ pub trait SyncEvent: Sized {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum NotificationOutcome {
     Acknowledged,
+    // A re-schedule may be required if a task becomes blocking without reaching suspension point
     ScheduleRequired,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum TaskProgressDependencies {
-    // if the specified tasks are running, this task is guaranteed to make progress (e.g. a mutex or a barrier with a necessary amount of waiters)
-    Known(HashSet<TaskId>),
-    // the current task is waiting, and we don't know which task will unblock it; the task must be running in order to catch that event; and the scheduler should keep some other task(s) running concurrently (e.g., a condvar or join)
-    UnknownActive,
-    // the current task is waiting, and we don't know which task will unblock it; the task does not need to be resumed, as the sync model will know when to resume it (e.g., a barrier with not enough waiters)
-    UnknownPassive,
+    /// The task is ready to be resumed, but it needs other tasks to be running at the same time (due to being driven by them or a cooperative concurrency/synchronization primitive)
+    /// Examples:
+    /// - mutex lock that is non-locked (depends on no other tasks)
+    /// - barrier with sufficient number of waiters (depends on other waiters for the same barrier)
+    /// - task inside of tokio::join or BufferedUnordered (depends on the parent task)
+    /// - waiting on tokio::watch if not waiting for recheck
+    /// Note:
+    /// `Ready` may specify `Blocked` task in `need_to_run`. E.g., a task inside of `tokio::join` will specify the parent as `need_to_run` while parent will be `Blocked`
+    Ready { need_to_run: HashSet<TaskId> },
+    /// The task is blocked on a synchronization primitive and cannot proceed yet (i.e., it will not reach its next suspension point).
+    /// If the task is suspended, it will not be selected for resumption unless other task requires it.
+    /// If all running tasks are `Blocked`, the scheduler will add additional `Ready` tasks.
+    /// If all tasks are `Blocked`, there is either a deadlock (if external tasks are impossible) or just not enough tasks are started (if external tasks are impossible).
+    /// Examples:
+    /// - tokio::watch if recheck is required (and was not updated)
+    /// - tokio::join/BufferedUnordered/tokio::spawn
+    /// - barrier with insufficient waiters
+    Blocked,
 }
 
 impl TaskProgressDependencies {
     fn merge(self, other: Self) -> Self {
         match (self, other) {
-            (Self::Known(mut t1), Self::Known(t2)) => Self::Known({
-                t1.extend(t2.into_iter());
-                t1
-            }),
-            (Self::UnknownActive, Self::Known(_) | Self::UnknownActive | Self::UnknownPassive)
-            | (Self::Known(_) | Self::UnknownPassive, Self::UnknownActive) => Self::UnknownActive,
-            (Self::UnknownPassive, Self::Known(_) | Self::UnknownPassive)
-            | (Self::Known(_), Self::UnknownPassive) => Self::UnknownPassive,
+            (
+                Self::Ready {
+                    need_to_run: mut t1,
+                },
+                Self::Ready { need_to_run: t2 },
+            ) => Self::Ready {
+                need_to_run: {
+                    t1.extend(t2.into_iter());
+                    t1
+                },
+            },
+            (Self::Blocked, Self::Ready { .. } | Self::Blocked)
+            | (Self::Ready { .. }, Self::Blocked) => Self::Blocked,
         }
     }
 }
@@ -146,13 +166,19 @@ mod tests {
     impl DynSyncModel for LockModel {
         fn task_progress_dependencies(&self, task_id: TaskId) -> TaskProgressDependencies {
             let Some(lock_id) = self.locks_waiting.get(&task_id).cloned() else {
-                return TaskProgressDependencies::Known(HashSet::new());
+                return TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new(),
+                };
             };
             let Some(holding_task_id) = self.locks_held_by.get(&lock_id).cloned() else {
-                return TaskProgressDependencies::Known(HashSet::new());
+                return TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new(),
+                };
             };
 
-            TaskProgressDependencies::Known([holding_task_id].into_iter().collect())
+            TaskProgressDependencies::Ready {
+                need_to_run: [holding_task_id].into_iter().collect(),
+            }
         }
     }
 
@@ -227,11 +253,15 @@ mod tests {
         let lock_id = LockId(1);
         assert_eq!(
             registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Known(HashSet::new())
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new()
+            }
         );
         assert_eq!(
             registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Known(HashSet::new())
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new()
+            }
         );
 
         assert_eq!(
@@ -243,11 +273,15 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Known(HashSet::new())
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new()
+            }
         );
         assert_eq!(
             registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Known(HashSet::new())
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new()
+            }
         );
 
         assert_eq!(
@@ -256,11 +290,15 @@ mod tests {
         );
         assert_eq!(
             registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Known(HashSet::new()),
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new()
+            },
         );
         assert_eq!(
             registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Known(HashSet::new())
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new()
+            }
         );
 
         assert_eq!(
@@ -269,11 +307,15 @@ mod tests {
         );
         assert_eq!(
             registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Known(HashSet::new()),
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new()
+            },
         );
         assert_eq!(
             registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Known([task_1].into_iter().collect()),
+            TaskProgressDependencies::Ready {
+                need_to_run: [task_1].into_iter().collect()
+            },
         );
 
         let err = registry
@@ -282,11 +324,15 @@ mod tests {
         assert!(err.0.contains("already taken"), "returned error: {err}");
         assert_eq!(
             registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Known(HashSet::new()),
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new()
+            },
         );
         assert_eq!(
             registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Known([task_1].into_iter().collect()),
+            TaskProgressDependencies::Ready {
+                need_to_run: [task_1].into_iter().collect()
+            },
         );
 
         assert_eq!(
@@ -295,11 +341,15 @@ mod tests {
         );
         assert_eq!(
             registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Known(HashSet::new()),
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new()
+            },
         );
         assert_eq!(
             registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Known(HashSet::new()),
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new()
+            },
         );
 
         assert_eq!(
@@ -308,11 +358,15 @@ mod tests {
         );
         assert_eq!(
             registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Known(HashSet::new()),
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new()
+            },
         );
         assert_eq!(
             registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Known(HashSet::new()),
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new()
+            },
         );
 
         assert_eq!(
@@ -321,11 +375,15 @@ mod tests {
         );
         assert_eq!(
             registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Known(HashSet::new()),
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new()
+            },
         );
         assert_eq!(
             registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Known(HashSet::new()),
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new()
+            },
         );
 
         assert_eq!(
@@ -340,11 +398,15 @@ mod tests {
         );
         assert_eq!(
             registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Known(HashSet::new())
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new()
+            }
         );
         assert_eq!(
             registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Known(HashSet::new())
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new()
+            }
         );
 
         assert_eq!(
@@ -353,11 +415,15 @@ mod tests {
         );
         assert_eq!(
             registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Known(HashSet::new())
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new()
+            }
         );
         assert_eq!(
             registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Known(HashSet::new())
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new()
+            }
         );
     }
 }

@@ -21,13 +21,17 @@ impl SyncModel for MutexModel {}
 impl DynSyncModel for MutexModel {
     fn task_progress_dependencies(&self, task_id: TaskId) -> TaskProgressDependencies {
         let Some(waiting) = self.waiting.get(&task_id) else {
-            return TaskProgressDependencies::Known(HashSet::new());
+            return TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new(),
+            };
         };
         let held_by: HashSet<TaskId> = waiting
             .iter()
             .filter_map(|mutex_id| self.held_by.get(mutex_id).cloned())
             .collect();
-        TaskProgressDependencies::Known(held_by)
+        TaskProgressDependencies::Ready {
+            need_to_run: held_by,
+        }
     }
 }
 

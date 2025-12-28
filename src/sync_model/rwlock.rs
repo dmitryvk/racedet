@@ -33,7 +33,9 @@ impl SyncModel for RwlockModel {}
 impl DynSyncModel for RwlockModel {
     fn task_progress_dependencies(&self, task_id: TaskId) -> TaskProgressDependencies {
         let Some(waiting) = self.waiting.get(&task_id) else {
-            return TaskProgressDependencies::Known(HashSet::new());
+            return TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new(),
+            };
         };
         let held_by: HashSet<TaskId> = waiting
             .iter()
@@ -48,7 +50,9 @@ impl DynSyncModel for RwlockModel {
                 },
             )
             .collect();
-        TaskProgressDependencies::Known(held_by)
+        TaskProgressDependencies::Ready {
+            need_to_run: held_by,
+        }
     }
 }
 
