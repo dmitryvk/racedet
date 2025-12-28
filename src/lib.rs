@@ -10,6 +10,7 @@ use crate::{
 mod executor;
 pub mod lock_model;
 mod scheduler;
+pub mod sync_model;
 
 pub use lock_model::SyncOperation;
 
