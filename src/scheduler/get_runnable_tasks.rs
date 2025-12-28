@@ -6,19 +6,19 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TasksToRun {
-    chosen_task: Option<TaskId>,
-    to_run: HashSet<TaskId>,
+pub(crate) struct TaskScheduleChoice {
+    pub(crate) chosen_task: Option<TaskId>,
+    pub(crate) to_run: HashSet<TaskId>,
 }
 
-pub(crate) fn get_runnable_tasks(
-    running_tasks: HashSet<TaskId>,
-    suspended_tasks: HashSet<TaskId>,
+pub(crate) fn get_eligible_scheduler_choices(
+    running_tasks: &HashSet<TaskId>,
+    suspended_tasks: &HashSet<TaskId>,
     sync: &SyncModelRegistry,
-) -> Vec<TasksToRun> {
+) -> Vec<TaskScheduleChoice> {
     let mut has_ready = false;
     let mut need_to_run = HashSet::new();
-    for task_id in &running_tasks {
+    for task_id in running_tasks {
         match task_transitive_deps(sync, *task_id) {
             TaskProgressDependencies::Ready {
                 need_to_run: cur_transitive_need_to_run,
@@ -35,7 +35,7 @@ pub(crate) fn get_runnable_tasks(
     }
 
     if has_ready {
-        return vec![TasksToRun {
+        return vec![TaskScheduleChoice {
             chosen_task: None,
             to_run: need_to_run,
         }];
@@ -43,7 +43,7 @@ pub(crate) fn get_runnable_tasks(
 
     let mut seen_task_sets = HashSet::<BTreeSet<TaskId>>::new();
     let mut result = Vec::new();
-    for &task_id in &suspended_tasks {
+    for &task_id in suspended_tasks {
         match task_transitive_deps(sync, task_id) {
             TaskProgressDependencies::Ready { need_to_run } => {
                 let deps: HashSet<TaskId> = need_to_run
@@ -51,7 +51,7 @@ pub(crate) fn get_runnable_tasks(
                     .filter(|task_id| !running_tasks.contains(&task_id))
                     .collect();
                 if seen_task_sets.insert(deps.iter().copied().collect()) {
-                    result.push(TasksToRun {
+                    result.push(TaskScheduleChoice {
                         chosen_task: Some(task_id),
                         to_run: deps,
                     });
@@ -109,14 +109,14 @@ mod tests {
         let task_ids = (1..=2)
             .map(|i| TaskId(NonZeroU64::new(i).unwrap()))
             .collect_vec();
-        let choices = get_runnable_tasks(
-            [task_ids[0]].into_iter().collect(),
-            [task_ids[1]].into_iter().collect(),
+        let choices = get_eligible_scheduler_choices(
+            &[task_ids[0]].into_iter().collect(),
+            &[task_ids[1]].into_iter().collect(),
             &sync_registry,
         );
         assert_eq!(
             choices,
-            vec![TasksToRun {
+            vec![TaskScheduleChoice {
                 chosen_task: None,
                 to_run: HashSet::new()
             }]
@@ -140,16 +140,16 @@ mod tests {
         sync_registry
             .on_notified(task_ids[1], ProvideDeps(TaskProgressDependencies::Blocked))
             .unwrap();
-        let choices = get_runnable_tasks(
-            [task_ids[0]].into_iter().collect(),
-            [task_ids[1], task_ids[2], task_ids[3]]
+        let choices = get_eligible_scheduler_choices(
+            &[task_ids[0]].into_iter().collect(),
+            &[task_ids[1], task_ids[2], task_ids[3]]
                 .into_iter()
                 .collect(),
             &sync_registry,
         );
         assert_eq!(
             choices,
-            vec![TasksToRun {
+            vec![TaskScheduleChoice {
                 chosen_task: None,
                 to_run: [task_ids[1], task_ids[2]].into_iter().collect()
             }]
@@ -173,9 +173,9 @@ mod tests {
         sync_registry
             .on_notified(task_ids[1], ProvideDeps(TaskProgressDependencies::Blocked))
             .unwrap();
-        let mut choices = get_runnable_tasks(
-            [].into_iter().collect(),
-            [task_ids[0], task_ids[1], task_ids[2], task_ids[3]]
+        let mut choices = get_eligible_scheduler_choices(
+            &[].into_iter().collect(),
+            &[task_ids[0], task_ids[1], task_ids[2], task_ids[3]]
                 .into_iter()
                 .collect(),
             &sync_registry,
@@ -191,7 +191,7 @@ mod tests {
         assert_eq!(choices.len(), 3);
         assert_eq!(
             choices[0],
-            TasksToRun {
+            TaskScheduleChoice {
                 chosen_task: Some(task_ids[0]),
                 to_run: [task_ids[0], task_ids[1], task_ids[2]]
                     .into_iter()
@@ -200,14 +200,14 @@ mod tests {
         );
         assert_eq!(
             choices[1],
-            TasksToRun {
+            TaskScheduleChoice {
                 chosen_task: Some(task_ids[2]),
                 to_run: [task_ids[2]].into_iter().collect()
             }
         );
         assert_eq!(
             choices[2],
-            TasksToRun {
+            TaskScheduleChoice {
                 chosen_task: Some(task_ids[3]),
                 to_run: [task_ids[3]].into_iter().collect()
             }
@@ -279,9 +279,9 @@ mod tests {
             )
             .unwrap();
 
-        let mut choices = get_runnable_tasks(
-            HashSet::new(),
-            task_ids.iter().copied().collect(),
+        let mut choices = get_eligible_scheduler_choices(
+            &HashSet::new(),
+            &task_ids.iter().copied().collect(),
             &sync_registry,
         );
 
@@ -296,14 +296,14 @@ mod tests {
         assert_eq!(choices.len(), 3);
         assert_eq!(
             choices[0],
-            TasksToRun {
+            TaskScheduleChoice {
                 chosen_task: Some(task_ids[0]),
                 to_run: [task_ids[0]].into_iter().collect()
             }
         );
         assert_eq!(
             choices[1],
-            TasksToRun {
+            TaskScheduleChoice {
                 chosen_task: Some(task_ids[1]),
                 to_run: [task_ids[1], task_ids[2]].into_iter().collect()
             }

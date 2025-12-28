@@ -1,5 +1,6 @@
 use std::{
     cell::RefCell,
+    collections::HashSet,
     mem,
     num::NonZeroU64,
     pin::pin,
@@ -11,6 +12,7 @@ use itertools::Itertools;
 use crate::{
     SyncOperation, TaskId, TaskStartBarrierId, Trace,
     lock_model::{BoxDynSyncOperation, ErasedSyncState},
+    scheduler::get_runnable_tasks::{TaskScheduleChoice, get_eligible_scheduler_choices},
     sync_model::{BadSyncError, NotificationOutcome, SyncEvent, SyncModelRegistry},
 };
 
@@ -430,45 +432,71 @@ impl Scheduler {
                         }
                     }
                 }
-                let has_running = inner
-                    .tasks
-                    .iter()
-                    .any(|task| matches!(task.state, TaskState::Running));
-                if !has_running {
-                    if let Some(next_running) = inner
-                        .task_selector
-                        .choose_next_running_task(&inner.tasks, &inner.locks)
-                    {
-                        let task = inner.tasks.get_mut(next_running).unwrap();
-                        task.prev_suspend_point = match mem::replace(
-                            &mut task.state,
-                            TaskState::Running,
-                        ) {
-                            TaskState::ReadyAtPoint {
-                                point,
-                                sync_operation,
-                            } => {
-                                if let Some(sync_operation) = sync_operation {
-                                    inner
-                                        .locks
-                                        .task_selected_for_running(task.id, &sync_operation)
-                                        .expect("usage should be correct");
-                                }
-                                point
+                let task_choices = {
+                    let mut running_tasks = HashSet::new();
+                    let mut suspended_tasks = HashSet::new();
+                    for task in &inner.tasks {
+                        match &task.state {
+                            TaskState::Running => {
+                                running_tasks.insert(task.id);
                             }
-                            TaskState::ReadyAtStart => "start".to_string(),
+                            TaskState::ReadyAtStart | TaskState::ReadyAtPoint { .. } => {
+                                suspended_tasks.insert(task.id);
+                            }
                             TaskState::Pending { .. }
                             | TaskState::WaitingAtStartBarrier { .. }
                             | TaskState::Unschedulable { .. }
-                            | TaskState::Running
                             | TaskState::Finished => {
-                                panic!(
-                                    "task {} {} is selected to run, but its state was not ReadyAtPoint/ReadyAtStart, but rather is {:?}. This is an internal error in conc-checker.",
-                                    task.id.0, task.name, task.state
-                                );
+                                // TODO: these states are unnecessary
                             }
-                        };
-                        tracing::debug!("switching to task {:?}", task.id);
+                        }
+                    }
+
+                    get_eligible_scheduler_choices(
+                        &running_tasks,
+                        &suspended_tasks,
+                        &inner.sync_model,
+                    )
+                };
+                if !task_choices.is_empty() {
+                    let task_choice = inner.task_selector.choose_next_running_task(&task_choices);
+                    tracing::debug!(
+                        "chose {task_choice:?} out of {} options: {task_choices:?}",
+                        task_choices.len()
+                    );
+                    if !task_choice.to_run.is_empty() {
+                        for task_id in &task_choice.to_run {
+                            let task = inner.tasks.iter_mut().find(|t| t.id == *task_id).unwrap();
+                            task.prev_suspend_point = match mem::replace(
+                                &mut task.state,
+                                TaskState::Running,
+                            ) {
+                                TaskState::ReadyAtPoint {
+                                    point,
+                                    sync_operation,
+                                } => {
+                                    if let Some(sync_operation) = sync_operation {
+                                        inner
+                                            .locks
+                                            .task_selected_for_running(task.id, &sync_operation)
+                                            .expect("usage should be correct");
+                                    }
+                                    point
+                                }
+                                TaskState::ReadyAtStart => "start".to_string(),
+                                TaskState::Pending { .. }
+                                | TaskState::WaitingAtStartBarrier { .. }
+                                | TaskState::Unschedulable { .. }
+                                | TaskState::Running
+                                | TaskState::Finished => {
+                                    panic!(
+                                        "task {} {} is selected to run, but its state was not ReadyAtPoint/ReadyAtStart, but rather is {:?}. This is an internal error in conc-checker.",
+                                        task.id.0, task.name, task.state
+                                    );
+                                }
+                            };
+                            tracing::debug!("resuming task {:?}", task.id);
+                        }
                         self.task_notify.notify_waiters();
                     } else {
                         tracing::debug!("no ready tasks!");
@@ -508,54 +536,24 @@ impl Drop for CurrentSchedulerGuard {
 }
 
 impl TaskSelector {
-    fn choose_next_running_task(
+    fn choose_next_running_task<'a>(
         &mut self,
-        tasks: &[Task],
-        sync_state: &ErasedSyncState,
-    ) -> Option<usize> {
+        task_choices: &'a [TaskScheduleChoice],
+    ) -> &'a TaskScheduleChoice {
         match self {
             TaskSelector::Random(random_task_selector) => {
-                random_task_selector.choose_next_running_task(tasks, sync_state)
+                random_task_selector.choose_next_running_task(task_choices)
             }
         }
     }
 }
 
 impl RandomTaskSelector {
-    fn choose_next_running_task(
+    fn choose_next_running_task<'a>(
         &mut self,
-        tasks: &[Task],
-        sync_state: &ErasedSyncState,
-    ) -> Option<usize> {
-        let num_ready = tasks
-            .iter()
-            .filter(|task| Self::may_choose_task(task, sync_state))
-            .count();
-        if num_ready == 0 {
-            return None;
-        }
-        let ord = rand::random_range(0..num_ready);
-        let idx = tasks
-            .iter()
-            .enumerate()
-            .filter(|(_, task)| Self::may_choose_task(task, sync_state))
-            .nth(ord)
-            .unwrap()
-            .0;
-        Some(idx)
-    }
-
-    fn may_choose_task(task: &Task, sync_state: &ErasedSyncState) -> bool {
-        match &task.state {
-            TaskState::ReadyAtStart => true,
-            TaskState::ReadyAtPoint { sync_operation, .. } => sync_operation
-                .as_ref()
-                .is_none_or(|op| sync_state.is_task_runnable(task.id, op)),
-            TaskState::Pending { .. }
-            | TaskState::WaitingAtStartBarrier { .. }
-            | TaskState::Unschedulable { .. }
-            | TaskState::Running
-            | TaskState::Finished => false,
-        }
+        task_choices: &'a [TaskScheduleChoice],
+    ) -> &'a TaskScheduleChoice {
+        let idx = rand::random_range(0..task_choices.len());
+        &task_choices[idx]
     }
 }
