@@ -11,6 +11,7 @@ use itertools::Itertools;
 use crate::{
     SyncOperation, TaskId, TaskStartBarrierId, Trace,
     lock_model::{BoxDynSyncOperation, ErasedSyncState},
+    sync_model::{BadSyncError, NotificationOutcome, SyncEvent, SyncModelRegistry},
 };
 
 thread_local! {
@@ -31,6 +32,7 @@ struct Inner {
     task_start_barriers: Vec<TaskStartBarrier>,
     locks: ErasedSyncState,
     trace: Vec<(TaskId, String)>,
+    sync_model: SyncModelRegistry,
 }
 
 pub(crate) struct Task {
@@ -65,7 +67,7 @@ enum TaskState {
         point: String,
         sync_operation: Option<BoxDynSyncOperation>,
     },
-    // The task is ready to be executed (at suspension point)
+    // The task is not ready to be executed (at suspension point)
     Unschedulable {
         interval_name: String,
     },
@@ -98,6 +100,7 @@ impl Scheduler {
                 task_start_barriers: Vec::new(),
                 locks: ErasedSyncState::new(),
                 trace: Vec::new(),
+                sync_model: SyncModelRegistry::new(),
             }),
             scheduler_notify: tokio::sync::Notify::new(),
             task_notify: tokio::sync::Notify::new(),
@@ -229,6 +232,24 @@ impl Scheduler {
             .push((task.id, format!("[{}->finish)", task.prev_suspend_point)));
         drop(guard);
         self.scheduler_notify.notify_waiters();
+    }
+
+    pub(crate) fn on_sync_event<T: SyncEvent>(
+        &self,
+        task_id: TaskId,
+        event: T,
+    ) -> Result<(), BadSyncError> {
+        let mut inner = self.lock();
+        match inner.sync_model.on_notified(task_id, event)? {
+            NotificationOutcome::Acknowledged => {
+                // do nothing
+            }
+            NotificationOutcome::ScheduleRequired => {
+                // TODO: force reschedule
+            }
+        }
+
+        Ok(())
     }
 
     pub(crate) async fn on_reached_point<S: SyncOperation>(

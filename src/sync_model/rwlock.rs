@@ -165,7 +165,7 @@ impl ProcessSyncEvent<ReleasedRwlock> for RwlockModel {
                             self.held_by.remove(&lock_id);
                         }
                     }
-                    HeldRwlock::Write(task_id) => {
+                    HeldRwlock::Write(_) => {
                         return Err(BadSyncError("the lock is held as write lock".to_string()));
                     }
                 }

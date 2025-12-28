@@ -6,6 +6,7 @@ use pin_project::pin_project;
 use crate::{
     executor::TaskFuture,
     scheduler::{RandomTaskSelector, Scheduler},
+    sync_model::SyncEvent,
 };
 mod executor;
 pub mod lock_model;
@@ -36,6 +37,15 @@ impl Drop for RegisteredTaskId {
         if let Some((scheduler, task_id)) = self.0.take() {
             scheduler.on_task_finished(task_id);
         }
+    }
+}
+
+pub fn sync_event<T: SyncEvent>(event: T) {
+    if let Some(scheduler) = Scheduler::current()
+        && let Some(task_id) = executor::current_task()
+        && let Err(err) = scheduler.on_sync_event(task_id, event)
+    {
+        panic!("invalid sync event: {err}");
     }
 }
 

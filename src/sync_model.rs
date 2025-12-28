@@ -64,18 +64,18 @@ trait ProcessSyncEvent<TOp: SyncEvent>: SyncModel {
     ) -> Result<NotificationOutcome, BadSyncError>;
 }
 
-trait SyncEvent: Sized {
+pub trait SyncEvent: Sized {
     type Model: ProcessSyncEvent<Self>;
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum NotificationOutcome {
+pub(crate) enum NotificationOutcome {
     Acknowledged,
     ScheduleRequired,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum TaskProgressDependencies {
+pub(crate) enum TaskProgressDependencies {
     // if the specified tasks are running, this task is guaranteed to make progress (e.g. a mutex or a barrier with a necessary amount of waiters)
     Known(HashSet<TaskId>),
     // the current task is waiting, and we don't know which task will unblock it; the task must be running in order to catch that event; and the scheduler should keep some other task(s) running concurrently (e.g., a condvar or join)
