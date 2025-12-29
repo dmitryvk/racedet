@@ -11,6 +11,12 @@ use crate::{
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct MutexId(String);
 
+impl MutexId {
+    pub fn new(id: String) -> Self {
+        Self(id)
+    }
+}
+
 #[derive(Default)]
 pub struct MutexModel {
     held_by: HashMap<MutexId, TaskId>,
@@ -20,34 +26,33 @@ pub struct MutexModel {
 impl SyncModel for MutexModel {}
 impl DynSyncModel for MutexModel {
     fn task_progress_dependencies(&self, task_id: TaskId) -> TaskProgressDependencies {
-        let Some(waiting) = self.waiting.get(&task_id) else {
-            return TaskProgressDependencies::Ready {
+        if self.waiting.get(&task_id).is_some_and(|waiting| {
+            waiting
+                .iter()
+                .any(|mutex_id| self.held_by.contains_key(mutex_id))
+        }) {
+            TaskProgressDependencies::Blocked
+        } else {
+            TaskProgressDependencies::Ready {
                 need_to_run: HashSet::new(),
-            };
-        };
-        let held_by: HashSet<TaskId> = waiting
-            .iter()
-            .filter_map(|mutex_id| self.held_by.get(mutex_id).cloned())
-            .collect();
-        TaskProgressDependencies::Ready {
-            need_to_run: held_by,
+            }
         }
     }
 }
 
-pub struct LockingMutex(MutexId);
+pub struct LockingMutex(pub MutexId);
 impl SyncEvent for LockingMutex {
     type Model = MutexModel;
 }
-pub struct AbortedLockingMutex(MutexId);
+pub struct AbortedLockingMutex(pub MutexId);
 impl SyncEvent for AbortedLockingMutex {
     type Model = MutexModel;
 }
-pub struct LockedMutex(MutexId);
+pub struct LockedMutex(pub MutexId);
 impl SyncEvent for LockedMutex {
     type Model = MutexModel;
 }
-pub struct ReleasedMutex(MutexId);
+pub struct ReleasedMutex(pub MutexId);
 impl SyncEvent for ReleasedMutex {
     type Model = MutexModel;
 }

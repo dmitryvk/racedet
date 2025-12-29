@@ -14,7 +14,6 @@
 //! `SyncOperation` implementations are backed by `SyncDomain` which tracks the necessary state
 //! (e.g., which tasks are holding locks or trying to acquire them).
 
-pub mod mutex;
 pub mod rwlock;
 
 use std::{
