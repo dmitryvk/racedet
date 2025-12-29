@@ -10,6 +10,11 @@ use crate::{
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct RwlockId(String);
+impl RwlockId {
+    pub fn new(id: String) -> Self {
+        Self(id)
+    }
+}
 
 #[derive(Default)]
 pub struct RwlockModel {
@@ -18,7 +23,7 @@ pub struct RwlockModel {
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-enum RwlockMode {
+pub enum RwlockMode {
     Read,
     Write,
 }
@@ -56,19 +61,19 @@ impl DynSyncModel for RwlockModel {
     }
 }
 
-pub struct LockingRwlock(RwlockId, RwlockMode);
+pub struct LockingRwlock(pub RwlockId, pub RwlockMode);
 impl SyncEvent for LockingRwlock {
     type Model = RwlockModel;
 }
-pub struct AbortedLockingRwlock(RwlockId, RwlockMode);
+pub struct AbortedLockingRwlock(pub RwlockId, pub RwlockMode);
 impl SyncEvent for AbortedLockingRwlock {
     type Model = RwlockModel;
 }
-pub struct LockedRwlock(RwlockId, RwlockMode);
+pub struct LockedRwlock(pub RwlockId, pub RwlockMode);
 impl SyncEvent for LockedRwlock {
     type Model = RwlockModel;
 }
-pub struct ReleasedRwlock(RwlockId, RwlockMode);
+pub struct ReleasedRwlock(pub RwlockId, pub RwlockMode);
 impl SyncEvent for ReleasedRwlock {
     type Model = RwlockModel;
 }
