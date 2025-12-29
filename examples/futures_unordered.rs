@@ -1,7 +1,8 @@
 use std::time::Duration;
 
-use conc_checker::{execute, new_scheduler};
-use conc_checker::{execution_point, register_task, task, task_join};
+use conc_checker::sync_model::join::{CompletedJoin, StartingJoin};
+use conc_checker::{execute, new_scheduler, sync_event};
+use conc_checker::{execution_point, register_task, task};
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
@@ -27,7 +28,7 @@ async fn main() {
 }
 
 async fn foo() {
-    let futs: FuturesUnordered<_> = (0..512)
+    let futs: FuturesUnordered<_> = (0..3)
         .map(|i| async move {
             task(register_task(&format!("fut {i}"), None), async {
                 execution_point("a").await;
@@ -36,11 +37,18 @@ async fn foo() {
             .await
         })
         .collect();
-    let mut results: Vec<_> = task(
-        register_task("main", None),
-        task_join("fut_unordered_collect", futs.collect()),
-    )
+    let mut results: Vec<_> = task(register_task("main", None), async {
+        tracing::debug!("sync_event starting collect");
+        sync_event(StartingJoin);
+        tracing::debug!("starting collect");
+
+        let res = futs.collect().await;
+        tracing::debug!("joined");
+        sync_event(CompletedJoin);
+        execution_point("joined").await;
+        res
+    })
     .await;
     results.sort();
-    assert_eq!(results, (0..512).collect::<Vec<_>>());
+    assert_eq!(results, (0..3).collect::<Vec<_>>());
 }
