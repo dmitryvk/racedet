@@ -13,6 +13,7 @@ use crate::{
     TaskId, Trace,
     scheduler::get_runnable_tasks::{TaskScheduleChoice, get_eligible_scheduler_choices},
     sync_model::{BadSyncError, NotificationOutcome, SyncEvent, SyncInitEvent, SyncModelRegistry},
+    trace::{TaskRef, TraceItem},
 };
 
 mod get_runnable_tasks;
@@ -31,7 +32,7 @@ struct Inner {
     next_task_id: u64,
     task_selector: TaskSelector,
     tasks: Vec<Task>,
-    trace: Vec<(TaskId, String)>,
+    trace: Vec<TraceEvent>,
     sync_model: SyncModelRegistry,
 }
 
@@ -51,6 +52,26 @@ enum TaskState {
     Running,
     // The task is finished
     Finished,
+}
+
+enum TraceEvent {
+    TaskStarted(TaskId),
+    TaskFinished(TaskId),
+    TaskSuspended {
+        task: TaskId,
+        suspend_point: String,
+    },
+    AutoResumedTasks {
+        resumed_tasks: Vec<TaskId>,
+        running_tasks: Vec<TaskId>,
+        suspended_tasks: Vec<TaskId>,
+    },
+    ScheduleDecision {
+        resumed_tasks: Vec<TaskId>,
+        running_tasks: Vec<TaskId>,
+        suspended_tasks: Vec<TaskId>,
+        options: Vec<Vec<TaskId>>,
+    },
 }
 
 pub(crate) enum TaskSelector {
@@ -112,6 +133,7 @@ impl Scheduler {
             prev_suspend_point: "(start)".to_string(),
             state: TaskState::Running,
         });
+        inner.trace.push(TraceEvent::TaskStarted(id));
         id
     }
 
@@ -125,9 +147,7 @@ impl Scheduler {
         let inner = &mut *guard;
         let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
         task.state = TaskState::Finished;
-        inner
-            .trace
-            .push((task.id, format!("[{}->finish)", task.prev_suspend_point)));
+        inner.trace.push(TraceEvent::TaskFinished(task_id));
         drop(guard);
         self.scheduler_notify.notify_waiters();
     }
@@ -176,9 +196,10 @@ impl Scheduler {
             let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
             match &task.state {
                 TaskState::Running => {
-                    inner
-                        .trace
-                        .push((task.id, format!("[{}->{name})", task.prev_suspend_point)));
+                    inner.trace.push(TraceEvent::TaskSuspended {
+                        task: task_id,
+                        suspend_point: name.to_string(),
+                    });
                 }
                 TaskState::Ready { .. } | TaskState::Finished => {
                     panic!(
@@ -212,11 +233,75 @@ impl Scheduler {
             trace: inner
                 .trace
                 .iter()
-                .map(|(task_id, point)| {
-                    let task = inner.tasks.get(task_id.0.get() as usize - 1).unwrap();
-                    format!("task {} {}: {point}", task.id.0, task.name)
+                .map(|trace_event| match trace_event {
+                    TraceEvent::TaskStarted(task_id) => {
+                        TraceItem::TaskStarted(Self::make_task_ref(&inner, *task_id))
+                    }
+                    TraceEvent::TaskFinished(task_id) => {
+                        TraceItem::TaskFinished(Self::make_task_ref(&inner, *task_id))
+                    }
+                    TraceEvent::TaskSuspended {
+                        task,
+                        suspend_point,
+                    } => TraceItem::TaskSuspended {
+                        task: Self::make_task_ref(&inner, *task),
+                        suspend_point: suspend_point.clone(),
+                    },
+                    TraceEvent::AutoResumedTasks {
+                        resumed_tasks,
+                        running_tasks,
+                        suspended_tasks,
+                    } => TraceItem::AutoResumedTasks {
+                        resumed_tasks: resumed_tasks
+                            .iter()
+                            .map(|task_id| Self::make_task_ref(&inner, *task_id))
+                            .collect(),
+                        running_tasks: running_tasks
+                            .iter()
+                            .map(|task_id| Self::make_task_ref(&inner, *task_id))
+                            .collect(),
+                        suspended_tasks: suspended_tasks
+                            .iter()
+                            .map(|task_id| Self::make_task_ref(&inner, *task_id))
+                            .collect(),
+                    },
+                    TraceEvent::ScheduleDecision {
+                        resumed_tasks,
+                        running_tasks,
+                        suspended_tasks,
+                        options,
+                    } => TraceItem::ScheduleDecision {
+                        resumed_tasks: resumed_tasks
+                            .iter()
+                            .map(|task_id| Self::make_task_ref(&inner, *task_id))
+                            .collect(),
+                        running_tasks: running_tasks
+                            .iter()
+                            .map(|task_id| Self::make_task_ref(&inner, *task_id))
+                            .collect(),
+                        suspended_tasks: suspended_tasks
+                            .iter()
+                            .map(|task_id| Self::make_task_ref(&inner, *task_id))
+                            .collect(),
+                        options: options
+                            .iter()
+                            .map(|tasks| {
+                                tasks
+                                    .iter()
+                                    .map(|task_id| Self::make_task_ref(&inner, *task_id))
+                                    .collect()
+                            })
+                            .collect(),
+                    },
                 })
                 .collect(),
+        }
+    }
+
+    fn make_task_ref(inner: &Inner, task_id: TaskId) -> TaskRef {
+        TaskRef {
+            id: task_id,
+            name: inner.tasks[Self::task_idx(task_id)].name.clone(),
         }
     }
 
@@ -271,6 +356,43 @@ impl Scheduler {
                         task_choices.len()
                     );
                     if !task_choice.to_run.is_empty() {
+                        if task_choice.chosen_task.is_some() {
+                            inner.trace.push(TraceEvent::ScheduleDecision {
+                                resumed_tasks: task_choice.to_run.iter().copied().collect(),
+                                running_tasks: inner
+                                    .tasks
+                                    .iter()
+                                    .filter(|task| matches!(task.state, TaskState::Running))
+                                    .map(|task| task.id)
+                                    .collect(),
+                                suspended_tasks: inner
+                                    .tasks
+                                    .iter()
+                                    .filter(|task| matches!(task.state, TaskState::Ready { .. }))
+                                    .map(|task| task.id)
+                                    .collect(),
+                                options: task_choices
+                                    .iter()
+                                    .map(|choice| choice.to_run.iter().copied().collect())
+                                    .collect(),
+                            });
+                        } else {
+                            inner.trace.push(TraceEvent::AutoResumedTasks {
+                                resumed_tasks: task_choice.to_run.iter().copied().collect(),
+                                running_tasks: inner
+                                    .tasks
+                                    .iter()
+                                    .filter(|task| matches!(task.state, TaskState::Running))
+                                    .map(|task| task.id)
+                                    .collect(),
+                                suspended_tasks: inner
+                                    .tasks
+                                    .iter()
+                                    .filter(|task| matches!(task.state, TaskState::Ready { .. }))
+                                    .map(|task| task.id)
+                                    .collect(),
+                            });
+                        }
                         for task_id in &task_choice.to_run {
                             let task = inner.tasks.iter_mut().find(|t| t.id == *task_id).unwrap();
                             task.prev_suspend_point = match mem::replace(
