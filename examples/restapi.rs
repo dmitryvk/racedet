@@ -10,10 +10,15 @@ use axum::{
     response::Response,
     routing::{get, post},
 };
-use conc_checker::{SchedulerHandle, TaskStartBarrierId, execution_point, new_scheduler, task};
+use conc_checker::{
+    SchedulerHandle, TaskStartBarrierId, execution_point, new_scheduler_with_start_task_barrier,
+    task,
+};
 use futures::{FutureExt, future::BoxFuture};
 use hyper::StatusCode;
 use serde::{Deserialize, Serialize};
+use tokio::select;
+use tokio_util::sync::CancellationToken;
 use tower::{Layer, Service};
 
 #[tokio::main]
@@ -62,7 +67,10 @@ async fn retrieve_concchecker_trace(
     State(state): State<Arc<AppState>>,
     Path(scheduler_id): Path<String>,
 ) -> Result<String, (StatusCode, String)> {
-    if let Some(scheduler) = state.scheduler_registry.take_scheduler(&scheduler_id) {
+    if let Some((scheduler, cancellation_token)) =
+        state.scheduler_registry.take_scheduler(&scheduler_id)
+    {
+        cancellation_token.cancel();
         Ok(format!("{}", scheduler.get_trace()))
     } else {
         Err((
@@ -130,7 +138,7 @@ impl ConcCheckerLayer {
 }
 
 struct SchedulerRegistry {
-    schedulers: Mutex<HashMap<String, (SchedulerHandle, TaskStartBarrierId)>>,
+    schedulers: Mutex<HashMap<String, (SchedulerHandle, TaskStartBarrierId, CancellationToken)>>,
 }
 
 impl SchedulerRegistry {
@@ -183,7 +191,7 @@ where
             .and_then(|h| h.to_str().ok())
             .and_then(|h| RequestConccheckerHeader::from_str(h).ok())
         {
-            let (scheduler, barrier) = self
+            let (scheduler, barrier, _) = self
                 .schedulers
                 .get_or_insert(header.scheduler_id, header.concurrent_task_count);
             let task_id = scheduler.register_task(&header.task_id, Some(barrier));
@@ -234,34 +242,37 @@ impl FromStr for RequestConccheckerHeader {
 struct RequestConccheckerHeaderParseError;
 
 impl SchedulerRegistry {
-    fn take_scheduler(&self, id: &str) -> Option<SchedulerHandle> {
+    fn take_scheduler(&self, id: &str) -> Option<(SchedulerHandle, CancellationToken)> {
         let mut schedulers = self.schedulers.lock().unwrap();
-        let (scheduler, _) = schedulers.remove(id)?;
-        Some(scheduler)
+        let (scheduler, _, cancellation_token) = schedulers.remove(id)?;
+        Some((scheduler, cancellation_token))
     }
 
     fn get_or_insert(
         self: &Arc<Self>,
         id: String,
         task_count: usize,
-    ) -> (SchedulerHandle, TaskStartBarrierId) {
+    ) -> (SchedulerHandle, TaskStartBarrierId, CancellationToken) {
         use std::collections::hash_map::Entry;
         let mut schedulers = self.schedulers.lock().unwrap();
         match schedulers.entry(id) {
             Entry::Occupied(entry) => {
-                let (scheduler, barrier) = entry.get();
-                (scheduler.clone(), *barrier)
+                let (scheduler, barrier, cancellation_token) = entry.get();
+                (scheduler.clone(), *barrier, cancellation_token.clone())
             }
             Entry::Vacant(entry) => {
-                let (scheduler, _scheduler_fut) = new_scheduler();
-                // TODO: use scheduler_fut
-                let barrier = scheduler.register_task_start_barrier("http requests", task_count);
+                let (scheduler, barrier, scheduler_fut) =
+                    new_scheduler_with_start_task_barrier("http requests", task_count);
+                let cancellation_token = CancellationToken::new();
                 let id = entry.key().clone();
                 tokio::spawn({
                     let scheduler = scheduler.clone();
+                    let cancellation_token = cancellation_token.clone();
                     async move {
-                        // TODO: scheduler stop conditions
-                        scheduler.clone().run_control_loop(Some(barrier)).await;
+                        select! {
+                            _ = cancellation_token.cancelled() => {},
+                            _ = scheduler_fut => {}
+                        }
 
                         tracing::info!(
                             "conchecker scheduler {id} complete. trace:\n{}",
@@ -269,8 +280,9 @@ impl SchedulerRegistry {
                         );
                     }
                 });
-                let (scheduler, barrier) = entry.insert((scheduler, barrier));
-                (scheduler.clone(), *barrier)
+                let (scheduler, barrier, cancellation_token) =
+                    entry.insert((scheduler, barrier, cancellation_token));
+                (scheduler.clone(), *barrier, cancellation_token.clone())
             }
         }
     }

@@ -19,4 +19,5 @@ axum = { version = "0.8.7", features = ["macros"] }
 hyper = "1.8.1"
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.17"
+tokio-util = "0.7.17"
 tower = "0.5.2"

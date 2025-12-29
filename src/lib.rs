@@ -104,6 +104,22 @@ pub fn new_scheduler() -> (SchedulerHandle, impl Future<Output = ()>) {
     (scheduler, control_fut)
 }
 
+pub fn new_scheduler_with_start_task_barrier(
+    barrier_name: &str,
+    num_tasks: usize,
+) -> (
+    SchedulerHandle,
+    TaskStartBarrierId,
+    impl Future<Output = ()>,
+) {
+    let scheduler = SchedulerHandle(Scheduler::new(scheduler::TaskSelector::Random(
+        RandomTaskSelector::new(),
+    )));
+    let start_task_barrier = scheduler.register_task_start_barrier(barrier_name, num_tasks);
+    let control_fut = scheduler.clone().run_control_loop(Some(start_task_barrier));
+    (scheduler, start_task_barrier, control_fut)
+}
+
 pub fn current_scheduler() -> Option<SchedulerHandle> {
     Scheduler::current().map(SchedulerHandle)
 }
@@ -122,7 +138,7 @@ impl SchedulerHandle {
         RegisteredTaskId(Some((self.0.clone(), task_id)))
     }
 
-    pub async fn run_control_loop(self, stop_barrier: Option<TaskStartBarrierId>) {
+    async fn run_control_loop(self, stop_barrier: Option<TaskStartBarrierId>) {
         self.0.run_control_loop(stop_barrier).await;
     }
 
