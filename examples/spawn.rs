@@ -1,11 +1,12 @@
 use std::time::Duration;
 
+use conc_checker::sync_model::join::{CompletedJoin, StartingJoin};
 use conc_checker::{
     current_scheduler, execute, maybe_with_scheduler, new_scheduler, register_task_start_barrier,
+    sync_event,
 };
-use conc_checker::{execution_point, register_task, task, task_join};
+use conc_checker::{execution_point, register_task, task};
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
-use tokio::join;
 use tokio::spawn;
 
 #[tokio::main]
@@ -33,26 +34,31 @@ async fn foo() {
 }
 
 async fn bar() {
-    execution_point("before").await;
+    execution_point("before spawn").await;
 
     // task_join means that the current task is waiting for nested tasks and should not be scheduled in of itself (but other tasks should be scheduled instead)
     let start_barrier_1 = register_task_start_barrier("1", 2);
-    let task_a = register_task("spawn a", start_barrier_1);
-    let task_b = register_task("spawn b", start_barrier_1);
-    task_join("join", async {
-        let (ra, rb) = join!(
-            spawn(maybe_with_scheduler(
-                current_scheduler(),
-                task(task_a, execution_point("a"))
-            )),
-            spawn(maybe_with_scheduler(
-                current_scheduler(),
-                task(task_b, execution_point("b"))
-            )),
-        );
-        ra.unwrap();
-        rb.unwrap();
-    })
-    .await;
-    println!("ok");
+    let task_a = spawn(maybe_with_scheduler(
+        current_scheduler(),
+        task(
+            register_task("spawn a", start_barrier_1),
+            execution_point("a"),
+        ),
+    ));
+    let task_b = spawn(maybe_with_scheduler(
+        current_scheduler(),
+        task(
+            register_task("spawn b", start_barrier_1),
+            execution_point("b"),
+        ),
+    ));
+    tracing::debug!("sync_event starting join");
+    sync_event(StartingJoin);
+    tracing::debug!("starting join");
+    task_a.await.unwrap();
+    task_b.await.unwrap();
+    tracing::debug!("joined");
+    sync_event(CompletedJoin);
+    tracing::info!("ok");
+    execution_point("joined").await;
 }
