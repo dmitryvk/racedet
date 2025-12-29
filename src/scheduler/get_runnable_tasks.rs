@@ -48,7 +48,7 @@ pub(crate) fn get_eligible_scheduler_choices(
             TaskProgressDependencies::Ready { need_to_run } => {
                 let deps: HashSet<TaskId> = need_to_run
                     .into_iter()
-                    .filter(|task_id| !running_tasks.contains(&task_id))
+                    .filter(|task_id| !running_tasks.contains(task_id))
                     .collect();
                 if seen_task_sets.insert(deps.iter().copied().collect()) {
                     result.push(TaskScheduleChoice {

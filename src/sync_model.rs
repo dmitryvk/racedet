@@ -52,13 +52,13 @@ impl SyncModelRegistry {
     }
 }
 
-pub(crate) trait DynSyncModel: Any + Send + Sync + 'static {
+pub trait DynSyncModel: Any + Send + Sync + 'static {
     fn task_progress_dependencies(&self, task_id: TaskId) -> TaskProgressDependencies;
 }
 
-pub(crate) trait SyncModel: DynSyncModel + Default {}
+pub trait SyncModel: DynSyncModel + Default {}
 
-pub(crate) trait ProcessSyncEvent<TOp: SyncEvent>: SyncModel {
+pub trait ProcessSyncEvent<TOp: SyncEvent>: SyncModel {
     fn on_notified(
         &mut self,
         task_id: TaskId,
@@ -71,20 +71,21 @@ pub trait SyncEvent: Sized {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum NotificationOutcome {
+pub enum NotificationOutcome {
     Acknowledged,
     // A re-schedule may be required if a task becomes blocking without reaching suspension point
     ScheduleRequired,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum TaskProgressDependencies {
+pub enum TaskProgressDependencies {
     /// The task is ready to be resumed, but it needs other tasks to be running at the same time (due to being driven by them or a cooperative concurrency/synchronization primitive)
     /// Examples:
     /// - mutex lock that is non-locked (depends on no other tasks)
     /// - barrier with sufficient number of waiters (depends on other waiters for the same barrier)
     /// - task inside of tokio::join or BufferedUnordered (depends on the parent task)
     /// - waiting on tokio::watch if not waiting for recheck
+    ///
     /// Note:
     /// `Ready` may specify `Blocked` task in `need_to_run`. E.g., a task inside of `tokio::join` will specify the parent as `need_to_run` while parent will be `Blocked`
     Ready { need_to_run: HashSet<TaskId> },
@@ -109,7 +110,7 @@ impl TaskProgressDependencies {
                 Self::Ready { need_to_run: t2 },
             ) => Self::Ready {
                 need_to_run: {
-                    t1.extend(t2.into_iter());
+                    t1.extend(t2);
                     t1
                 },
             },
