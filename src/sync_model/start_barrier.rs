@@ -13,7 +13,7 @@ use crate::{
     },
 };
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct BarrierId(usize);
 
 impl BarrierId {
@@ -23,15 +23,17 @@ impl BarrierId {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct BarrierModel {
     task_waiting: HashMap<TaskId, BarrierId>,
     barriers: HashMap<BarrierId, BarrierState>,
 }
 
+#[derive(Debug)]
 struct BarrierState {
     capacity: usize,
-    waiting_tasks: HashSet<TaskId>,
+    reached: bool,
+    tasks: HashSet<TaskId>,
 }
 
 impl SyncModel for BarrierModel {}
@@ -48,9 +50,9 @@ impl DynSyncModel for BarrierModel {
                 need_to_run: HashSet::new(),
             };
         };
-        if barrier.waiting_tasks.len() >= barrier.capacity {
+        if barrier.reached {
             TaskProgressDependencies::Ready {
-                need_to_run: barrier.waiting_tasks.clone(),
+                need_to_run: barrier.tasks.clone(),
             }
         } else {
             TaskProgressDependencies::Blocked
@@ -87,7 +89,8 @@ impl ProcessSyncInitEvent<NewBarrier> for BarrierModel {
             event.barrier,
             BarrierState {
                 capacity: event.capacity,
-                waiting_tasks: HashSet::new(),
+                reached: false,
+                tasks: HashSet::new(),
             },
         );
         Ok(NotificationOutcome::Acknowledged)
@@ -100,6 +103,7 @@ impl ProcessSyncEvent<WaitingForBarrier> for BarrierModel {
         task_id: TaskId,
         WaitingForBarrier(barrier_id): WaitingForBarrier,
     ) -> Result<NotificationOutcome, BadSyncError> {
+        tracing::debug!("barriers before waiting {barrier_id:?}: {self:?}");
         let barrier = self
             .barriers
             .get_mut(&barrier_id)
@@ -109,7 +113,11 @@ impl ProcessSyncEvent<WaitingForBarrier> for BarrierModel {
                 "task is already waiting on a barrier".to_string(),
             ));
         }
-        barrier.waiting_tasks.insert(task_id);
+        barrier.tasks.insert(task_id);
+        if !barrier.reached && barrier.tasks.len() >= barrier.capacity {
+            barrier.reached = true;
+        }
+        tracing::debug!("barriers after waiting {barrier_id:?}: {self:?}");
         Ok(NotificationOutcome::Acknowledged)
     }
 }
@@ -124,16 +132,11 @@ impl ProcessSyncEvent<AbortedWaitingForBarrier> for BarrierModel {
             .barriers
             .get_mut(&barrier_id)
             .ok_or_else(|| BadSyncError("barrier not exists".to_string()))?;
-        if !barrier.waiting_tasks.remove(&task_id) {
-            return Err(BadSyncError(
-                "task is not waiting on the barrier".to_string(),
-            ));
+        barrier.tasks.remove(&task_id);
+        if barrier.tasks.is_empty() {
+            self.barriers.remove(&barrier_id);
         }
-        if self.task_waiting.remove(&task_id) != Some(barrier_id) {
-            return Err(BadSyncError(
-                "task is not waiting on the barrier".to_string(),
-            ));
-        }
+        self.task_waiting.remove(&task_id);
         Ok(NotificationOutcome::Acknowledged)
     }
 }
@@ -148,19 +151,11 @@ impl ProcessSyncEvent<CompletedBarrierWait> for BarrierModel {
             .barriers
             .get_mut(&barrier_id)
             .ok_or_else(|| BadSyncError("barrier not exists".to_string()))?;
-        if !barrier.waiting_tasks.remove(&task_id) {
-            return Err(BadSyncError(
-                "task is not waiting on the barrier (1)".to_string(),
-            ));
-        }
-        if barrier.waiting_tasks.is_empty() {
+        barrier.tasks.remove(&task_id);
+        if barrier.tasks.is_empty() {
             self.barriers.remove(&barrier_id);
         }
-        if self.task_waiting.remove(&task_id) != Some(barrier_id) {
-            return Err(BadSyncError(
-                "task is not waiting on the barrier (2)".to_string(),
-            ));
-        }
+        self.task_waiting.remove(&task_id);
         Ok(NotificationOutcome::Acknowledged)
     }
 }
