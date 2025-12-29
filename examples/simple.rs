@@ -1,16 +1,42 @@
-use std::sync::{Arc, atomic::AtomicI64};
+use std::{
+    sync::{Arc, atomic::AtomicI64},
+    time::Duration,
+};
 
 use conc_checker::{
-    execute, execution_point, new_scheduler, register_task, register_task_start_barrier, task,
+    capture_panics::capture_panic, execution_point, new_scheduler, register_task,
+    register_task_start_barrier, task, with_scheduler,
 };
+use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
 use tokio::join;
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    let (trace, res) = execute(new_scheduler(), foo()).await;
-    println!("{res:?}");
+    let (scheduler, control_fut) = new_scheduler();
+    tokio::spawn(control_fut);
+    let res = timeout(
+        Duration::from_secs(10),
+        CaptureSpanAndStackTrace,
+        with_scheduler(scheduler.clone(), capture_panic(foo())),
+    )
+    .await;
+    let trace = scheduler.get_trace();
     println!("{trace}");
+    match res {
+        Ok(Ok(res)) => {
+            println!("ok {res:?}");
+        }
+        Ok(Err(panic)) => {
+            println!(
+                "panic {} at {}\n{}",
+                panic.message, panic.location, panic.backtrace
+            );
+        }
+        Err(timeout) => {
+            println!("timeout {}", timeout.active_traces[0].stack_trace());
+        }
+    }
 }
 
 async fn foo() {

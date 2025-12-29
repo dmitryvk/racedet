@@ -395,7 +395,7 @@ impl Scheduler {
                         tracing::debug!("no ready tasks!");
                     }
                 } else {
-                    tracing::debug!("run loop control: a task is already running");
+                    tracing::debug!("run loop control: no tasks to resume");
                 }
 
                 if let Some(stop_barrier) = stop_barrier

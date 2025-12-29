@@ -1,11 +1,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use conc_checker::capture_panics::capture_panic;
 use conc_checker::sync_model::rwlock::{
     LockedRwlock, LockingRwlock, ReleasedRwlock, RwlockId, RwlockMode,
 };
-use conc_checker::{RunResult, execute, new_scheduler, register_task_start_barrier, sync_event};
 use conc_checker::{execution_point, register_task, task};
+use conc_checker::{new_scheduler, register_task_start_barrier, sync_event, with_scheduler};
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
 use tokio::join;
 use tokio::sync::RwLock;
@@ -13,21 +14,28 @@ use tokio::sync::RwLock;
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    let (trace, res) = execute(
-        new_scheduler(),
-        timeout(Duration::from_secs(1), CaptureSpanAndStackTrace, foo()),
+    let (scheduler, control_fut) = new_scheduler();
+    tokio::spawn(control_fut);
+    let res = timeout(
+        Duration::from_secs(10),
+        CaptureSpanAndStackTrace,
+        with_scheduler(scheduler.clone(), capture_panic(foo())),
     )
     .await;
+    let trace = scheduler.get_trace();
     println!("{trace}");
     match res {
-        RunResult::Ok(Ok(res)) => {
-            println!("{res:?}");
+        Ok(Ok(res)) => {
+            println!("ok {res:?}");
         }
-        RunResult::Ok(Err(err)) => {
-            println!("timeout {}", err.active_traces[0].stack_trace());
+        Ok(Err(panic)) => {
+            println!(
+                "panic {} at {}\n{}",
+                panic.message, panic.location, panic.backtrace
+            );
         }
-        RunResult::Panic(pi) => {
-            println!("panic {} at {}\n{}", pi.message, pi.location, pi.backtrace);
+        Err(timeout) => {
+            println!("timeout {}", timeout.active_traces[0].stack_trace());
         }
     }
 }

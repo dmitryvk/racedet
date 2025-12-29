@@ -1,6 +1,5 @@
 use std::{num::NonZeroU64, sync::Arc, task::Poll};
 
-use futures::FutureExt;
 use pin_project::pin_project;
 
 use crate::{
@@ -8,6 +7,7 @@ use crate::{
     scheduler::{RandomTaskSelector, Scheduler},
     sync_model::SyncEvent,
 };
+pub mod capture_panics;
 mod executor;
 mod scheduler;
 pub mod sync_model;
@@ -96,10 +96,12 @@ impl Drop for TaskFinishedGuard {
 #[derive(Clone)]
 pub struct SchedulerHandle(Arc<Scheduler>);
 
-pub fn new_scheduler() -> SchedulerHandle {
-    SchedulerHandle(Scheduler::new(scheduler::TaskSelector::Random(
+pub fn new_scheduler() -> (SchedulerHandle, impl Future<Output = ()>) {
+    let scheduler = SchedulerHandle(Scheduler::new(scheduler::TaskSelector::Random(
         RandomTaskSelector::new(),
-    )))
+    )));
+    let control_fut = scheduler.clone().run_control_loop(None);
+    (scheduler, control_fut)
 }
 
 pub fn current_scheduler() -> Option<SchedulerHandle> {
@@ -127,19 +129,6 @@ impl SchedulerHandle {
     pub fn get_trace(&self) -> Trace {
         self.0.get_trace()
     }
-}
-
-pub async fn execute<T, Fut>(scheduler: SchedulerHandle, inner: Fut) -> (Trace, RunResult<T>)
-where
-    Fut: Future<Output = T> + Sized,
-{
-    let res = RunAlong {
-        main_fut: executor::run(scheduler.0.clone(), inner),
-        aux_fut: scheduler.0.run_control_loop(None).fuse(),
-    }
-    .await;
-    let trace = scheduler.0.get_trace();
-    (trace, res)
 }
 
 pub fn with_scheduler<Fut>(scheduler: SchedulerHandle, inner: Fut) -> WithScheduler<Fut> {

@@ -253,12 +253,14 @@ impl SchedulerRegistry {
                 (scheduler.clone(), *barrier)
             }
             Entry::Vacant(entry) => {
-                let scheduler = new_scheduler();
+                let (scheduler, _scheduler_fut) = new_scheduler();
+                // TODO: use scheduler_fut
                 let barrier = scheduler.register_task_start_barrier("http requests", task_count);
                 let id = entry.key().clone();
                 tokio::spawn({
                     let scheduler = scheduler.clone();
                     async move {
+                        // TODO: scheduler stop conditions
                         scheduler.clone().run_control_loop(Some(barrier)).await;
 
                         tracing::info!(

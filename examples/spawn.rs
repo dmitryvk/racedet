@@ -1,30 +1,40 @@
 use std::time::Duration;
 
-use conc_checker::sync_model::join::{CompletedJoin, StartingJoin};
 use conc_checker::{
-    current_scheduler, execute, maybe_with_scheduler, new_scheduler, register_task_start_barrier,
-    sync_event,
+    capture_panics::capture_panic,
+    current_scheduler, execution_point, maybe_with_scheduler, new_scheduler, register_task,
+    register_task_start_barrier, sync_event,
+    sync_model::join::{CompletedJoin, StartingJoin},
+    task, with_scheduler,
 };
-use conc_checker::{execution_point, register_task, task};
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
 use tokio::spawn;
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    match timeout(
-        Duration::from_secs(1),
+    let (scheduler, control_fut) = new_scheduler();
+    tokio::spawn(control_fut);
+    let res = timeout(
+        Duration::from_secs(10),
         CaptureSpanAndStackTrace,
-        execute(new_scheduler(), foo()),
+        with_scheduler(scheduler.clone(), capture_panic(foo())),
     )
-    .await
-    {
-        Ok((trace, res)) => {
-            println!("{res:?}");
-            println!("{trace}");
+    .await;
+    let trace = scheduler.get_trace();
+    println!("{trace}");
+    match res {
+        Ok(Ok(res)) => {
+            println!("ok {res:?}");
         }
-        Err(err) => {
-            println!("timeout {}", err.active_traces[0].stack_trace());
+        Ok(Err(panic)) => {
+            println!(
+                "panic {} at {}\n{}",
+                panic.message, panic.location, panic.backtrace
+            );
+        }
+        Err(timeout) => {
+            println!("timeout {}", timeout.active_traces[0].stack_trace());
         }
     }
 }
