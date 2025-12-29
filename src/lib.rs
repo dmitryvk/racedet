@@ -7,11 +7,13 @@ use crate::{
     executor::TaskFuture,
     scheduler::{RandomTaskSelector, Scheduler},
     sync_model::{SyncEvent, SyncInitEvent},
+    trace::Trace,
 };
 pub mod capture_panics;
 mod executor;
 mod scheduler;
 pub mod sync_model;
+pub mod trace;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TaskId(NonZeroU64);
@@ -174,20 +176,6 @@ impl<MainFut: Future, AuxFut: Future> Future for RunAlong<MainFut, AuxFut> {
 pub enum RunResult<T> {
     Ok(T),
     Panic(PanicInfo),
-}
-
-#[derive(Debug, Clone)]
-pub struct Trace {
-    pub trace: Vec<String>,
-}
-
-impl std::fmt::Display for Trace {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for (i, step) in self.trace.iter().enumerate() {
-            writeln!(f, "{i}. {step}")?;
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone)]
