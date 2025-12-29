@@ -21,6 +21,7 @@ use std::{
 
 use crate::TaskId;
 
+pub mod join;
 pub mod mutex;
 pub mod rwlock;
 

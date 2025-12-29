@@ -1,7 +1,8 @@
 use std::time::Duration;
 
-use conc_checker::{execute, new_scheduler, register_task_start_barrier};
-use conc_checker::{execution_point, register_task, task, task_join};
+use conc_checker::sync_model::join::{CompletedJoin, StartingJoin};
+use conc_checker::{execute, new_scheduler, register_task_start_barrier, sync_event};
+use conc_checker::{execution_point, register_task, task};
 use futures::FutureExt;
 use futures::select;
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
@@ -32,30 +33,37 @@ async fn foo() {
 }
 
 async fn bar() {
-    execution_point("before").await;
+    execution_point("spawn tasks").await;
 
     // task_join means that the current task is waiting for nested tasks and should not be scheduled in of itself (but other tasks should be scheduled instead)
     let start_barrier_1 = register_task_start_barrier("1", 2);
     let task_a = register_task("a", start_barrier_1);
     let task_b = register_task("b", start_barrier_1);
-    task_join("join", async {
-        join!(
-            task(task_a, execution_point("a")),
-            task(task_b, execution_point("b"))
-        )
-    })
-    .await;
-    println!("ok");
+    tracing::debug!("sync_event starting join");
+    sync_event(StartingJoin);
+    tracing::debug!("starting join");
+    join!(
+        task(task_a, execution_point("a")),
+        task(task_b, execution_point("b"))
+    );
+    tracing::debug!("joined");
+    sync_event(CompletedJoin);
+    execution_point("joined").await;
+    tracing::info!("ok");
+    execution_point("select start").await;
     let start_barrier_2 = register_task_start_barrier("2", 3);
     let task_c = register_task("c", start_barrier_2);
     let task_d = register_task("d", start_barrier_2);
     let task_sleep = register_task("sleep", start_barrier_2);
-    task_join("select", async {
-        select! {
-            _ = task(task_c, execution_point("c")).fuse() => {},
-            _ = task(task_d, execution_point("d")).fuse() => {},
-            _ = task(task_sleep, sleep(Duration::from_millis(10))).fuse() => {}
-        }
-    })
-    .await;
+    tracing::debug!("sync_event starting select");
+    sync_event(StartingJoin);
+    tracing::debug!("starting select");
+    select! {
+        _ = task(task_c, execution_point("c")).fuse() => {},
+        _ = task(task_d, execution_point("d")).fuse() => {},
+        _ = task(task_sleep, sleep(Duration::from_millis(10))).fuse() => {}
+    }
+    tracing::debug!("done select");
+    sync_event(CompletedJoin);
+    execution_point("selected").await;
 }
