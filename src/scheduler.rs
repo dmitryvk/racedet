@@ -39,7 +39,7 @@ struct Inner {
 pub(crate) struct Task {
     id: TaskId,
     name: String,
-    prev_suspend_point: String,
+    prev_suspend_point: Option<String>,
     state: TaskState,
 }
 
@@ -63,15 +63,20 @@ enum TraceEvent {
     },
     AutoResumedTasks {
         resumed_tasks: Vec<TaskId>,
-        running_tasks: Vec<TaskId>,
-        suspended_tasks: Vec<TaskId>,
+        running_tasks: Vec<TraceTaskSnapshot>,
+        suspended_tasks: Vec<TraceTaskSnapshot>,
     },
     ScheduleDecision {
         resumed_tasks: Vec<TaskId>,
-        running_tasks: Vec<TaskId>,
-        suspended_tasks: Vec<TaskId>,
+        running_tasks: Vec<TraceTaskSnapshot>,
+        suspended_tasks: Vec<TraceTaskSnapshot>,
         options: Vec<Vec<TaskId>>,
     },
+}
+
+struct TraceTaskSnapshot {
+    task_id: TaskId,
+    point: Option<String>,
 }
 
 pub(crate) enum TaskSelector {
@@ -130,7 +135,7 @@ impl Scheduler {
         inner.tasks.push(Task {
             id,
             name,
-            prev_suspend_point: "(start)".to_string(),
+            prev_suspend_point: None,
             state: TaskState::Running,
         });
         inner.trace.push(TraceEvent::TaskStarted(id));
@@ -258,11 +263,11 @@ impl Scheduler {
                             .collect(),
                         running_tasks: running_tasks
                             .iter()
-                            .map(|task_id| Self::make_task_ref(&inner, *task_id))
+                            .map(|task_snapshot| Self::make_task_snapshot(&inner, task_snapshot))
                             .collect(),
                         suspended_tasks: suspended_tasks
                             .iter()
-                            .map(|task_id| Self::make_task_ref(&inner, *task_id))
+                            .map(|task_snapshot| Self::make_task_snapshot(&inner, task_snapshot))
                             .collect(),
                     },
                     TraceEvent::ScheduleDecision {
@@ -277,11 +282,11 @@ impl Scheduler {
                             .collect(),
                         running_tasks: running_tasks
                             .iter()
-                            .map(|task_id| Self::make_task_ref(&inner, *task_id))
+                            .map(|task_snapshot| Self::make_task_snapshot(&inner, task_snapshot))
                             .collect(),
                         suspended_tasks: suspended_tasks
                             .iter()
-                            .map(|task_id| Self::make_task_ref(&inner, *task_id))
+                            .map(|task_snapshot| Self::make_task_snapshot(&inner, task_snapshot))
                             .collect(),
                         options: options
                             .iter()
@@ -302,6 +307,18 @@ impl Scheduler {
         TaskRef {
             id: task_id,
             name: inner.tasks[Self::task_idx(task_id)].name.clone(),
+        }
+    }
+
+    fn make_task_snapshot(
+        inner: &Inner,
+        task_snapshot: &TraceTaskSnapshot,
+    ) -> crate::trace::TaskSnapshot {
+        let task = &inner.tasks[Self::task_idx(task_snapshot.task_id)];
+        crate::trace::TaskSnapshot {
+            id: task_snapshot.task_id,
+            name: task.name.clone(),
+            position: task_snapshot.point.clone(),
         }
     }
 
@@ -363,13 +380,29 @@ impl Scheduler {
                                     .tasks
                                     .iter()
                                     .filter(|task| matches!(task.state, TaskState::Running))
-                                    .map(|task| task.id)
+                                    .map(|task| TraceTaskSnapshot {
+                                        task_id: task.id,
+                                        point: match &task.state {
+                                            TaskState::Ready { point } => Some(point.clone()),
+                                            TaskState::Running | TaskState::Finished => {
+                                                task.prev_suspend_point.clone()
+                                            }
+                                        },
+                                    })
                                     .collect(),
                                 suspended_tasks: inner
                                     .tasks
                                     .iter()
                                     .filter(|task| matches!(task.state, TaskState::Ready { .. }))
-                                    .map(|task| task.id)
+                                    .map(|task| TraceTaskSnapshot {
+                                        task_id: task.id,
+                                        point: match &task.state {
+                                            TaskState::Ready { point } => Some(point.clone()),
+                                            TaskState::Running | TaskState::Finished => {
+                                                task.prev_suspend_point.clone()
+                                            }
+                                        },
+                                    })
                                     .collect(),
                                 options: task_choices
                                     .iter()
@@ -383,13 +416,29 @@ impl Scheduler {
                                     .tasks
                                     .iter()
                                     .filter(|task| matches!(task.state, TaskState::Running))
-                                    .map(|task| task.id)
+                                    .map(|task| TraceTaskSnapshot {
+                                        task_id: task.id,
+                                        point: match &task.state {
+                                            TaskState::Ready { point } => Some(point.clone()),
+                                            TaskState::Running | TaskState::Finished => {
+                                                task.prev_suspend_point.clone()
+                                            }
+                                        },
+                                    })
                                     .collect(),
                                 suspended_tasks: inner
                                     .tasks
                                     .iter()
                                     .filter(|task| matches!(task.state, TaskState::Ready { .. }))
-                                    .map(|task| task.id)
+                                    .map(|task| TraceTaskSnapshot {
+                                        task_id: task.id,
+                                        point: match &task.state {
+                                            TaskState::Ready { point } => Some(point.clone()),
+                                            TaskState::Running | TaskState::Finished => {
+                                                task.prev_suspend_point.clone()
+                                            }
+                                        },
+                                    })
                                     .collect(),
                             });
                         }
@@ -399,7 +448,7 @@ impl Scheduler {
                                 &mut task.state,
                                 TaskState::Running,
                             ) {
-                                TaskState::Ready { point } => point,
+                                TaskState::Ready { point } => Some(point),
                                 TaskState::Running | TaskState::Finished => {
                                     panic!(
                                         "task {} {} is selected to run, but its state was not Ready, but rather is {:?}. This is an internal error in conc-checker.",
