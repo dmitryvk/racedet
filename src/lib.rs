@@ -9,11 +9,8 @@ use crate::{
     sync_model::SyncEvent,
 };
 mod executor;
-pub mod lock_model;
 mod scheduler;
 pub mod sync_model;
-
-pub use lock_model::SyncOperation;
 
 #[derive(Clone)]
 pub struct RegisteredTaskId(Option<(Arc<Scheduler>, TaskId)>);
@@ -53,19 +50,7 @@ pub async fn execution_point(name: &str) {
     if let Some(scheduler) = Scheduler::current()
         && let Some(task_id) = executor::current_task()
     {
-        scheduler
-            .on_reached_point(task_id, name, None::<lock_model::Noop>)
-            .await;
-    }
-}
-
-pub async fn execution_point_with_sync<O: SyncOperation>(name: &str, operation: O) {
-    if let Some(scheduler) = Scheduler::current()
-        && let Some(task_id) = executor::current_task()
-    {
-        scheduler
-            .on_reached_point(task_id, name, Some(operation))
-            .await;
+        scheduler.on_reached_point(task_id, name).await;
     }
 }
 

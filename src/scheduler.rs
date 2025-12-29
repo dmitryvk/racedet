@@ -10,8 +10,7 @@ use std::{
 use itertools::Itertools;
 
 use crate::{
-    SyncOperation, TaskId, TaskStartBarrierId, Trace,
-    lock_model::{BoxDynSyncOperation, ErasedSyncState},
+    TaskId, TaskStartBarrierId, Trace,
     scheduler::get_runnable_tasks::{TaskScheduleChoice, get_eligible_scheduler_choices},
     sync_model::{BadSyncError, NotificationOutcome, SyncEvent, SyncModelRegistry},
 };
@@ -34,7 +33,6 @@ struct Inner {
     task_selector: TaskSelector,
     tasks: Vec<Task>,
     task_start_barriers: Vec<TaskStartBarrier>,
-    locks: ErasedSyncState,
     trace: Vec<(TaskId, String)>,
     sync_model: SyncModelRegistry,
 }
@@ -69,7 +67,6 @@ enum TaskState {
     // The task is ready to be executed (at suspension point)
     ReadyAtPoint {
         point: String,
-        sync_operation: Option<BoxDynSyncOperation>,
     },
     // The task is not ready to be executed (at suspension point)
     Unschedulable {
@@ -102,7 +99,6 @@ impl Scheduler {
                 task_selector,
                 tasks: Vec::new(),
                 task_start_barriers: Vec::new(),
-                locks: ErasedSyncState::new(),
                 trace: Vec::new(),
                 sync_model: SyncModelRegistry::new(),
             }),
@@ -256,17 +252,8 @@ impl Scheduler {
         Ok(())
     }
 
-    pub(crate) async fn on_reached_point<S: SyncOperation>(
-        &self,
-        task_id: TaskId,
-        name: &str,
-        sync_operation: Option<S>,
-    ) {
-        if let Some(sync_op) = &sync_operation {
-            tracing::debug!("reached point {task_id:?} {name} with {sync_op:?}");
-        } else {
-            tracing::debug!("reached point {task_id:?} {name}");
-        }
+    pub(crate) async fn on_reached_point(&self, task_id: TaskId, name: &str) {
+        tracing::debug!("reached point {task_id:?} {name}");
 
         {
             let mut guard = self.lock();
@@ -292,10 +279,8 @@ impl Scheduler {
                 );
                 }
             }
-            let sync_operation = sync_operation.map(|op| inner.locks.make_dyn_operation(op));
             task.state = TaskState::ReadyAtPoint {
                 point: name.to_string(),
-                sync_operation,
             };
             drop(guard);
         }
@@ -370,7 +355,6 @@ impl Scheduler {
             ));
             task.state = TaskState::ReadyAtPoint {
                 point: interval_name.clone(),
-                sync_operation: None,
             };
         }
         self.scheduler_notify.notify_waiters();
@@ -471,18 +455,7 @@ impl Scheduler {
                                 &mut task.state,
                                 TaskState::Running,
                             ) {
-                                TaskState::ReadyAtPoint {
-                                    point,
-                                    sync_operation,
-                                } => {
-                                    if let Some(sync_operation) = sync_operation {
-                                        inner
-                                            .locks
-                                            .task_selected_for_running(task.id, &sync_operation)
-                                            .expect("usage should be correct");
-                                    }
-                                    point
-                                }
+                                TaskState::ReadyAtPoint { point } => point,
                                 TaskState::ReadyAtStart => "start".to_string(),
                                 TaskState::Pending { .. }
                                 | TaskState::WaitingAtStartBarrier { .. }

@@ -1,3 +1,19 @@
+//! Task scheduler needs the knowledge of task synchronization, such as locks.
+//! Without that information, the following situation is possible:
+//! - Task A holds lock X
+//! - Task B tries to take lock X
+//! - Scheduler B picks the task B as runnable
+//! - Since that task can not make progress while that lock is held, the whole execution halts.
+//!
+//! To handle the situation well, at each schedule opportunity the scheduler needs to know if
+//! the task can make progress.
+//! This requires modeling synchronization primitives such as locks or joins.
+//! Synchronization operations are represented by structs implementing `SyncEvent` trait.
+//! This allows for extensibility and for supporting synchronization operations with various semantics, e.g.
+//! recursive vs non-recursive mutexes, fair and non-fair mutexes, in-memory and SQL locks.
+//! `SyncEvent` implementations are backed by `SyncModel` which tracks the necessary state
+//! (e.g., which tasks are holding locks or trying to acquire them).
+
 use std::{
     any::{Any, TypeId},
     collections::{HashMap, HashSet},
