@@ -10,7 +10,7 @@ use std::{
 use itertools::Itertools;
 
 use crate::{
-    TaskId, TaskStartBarrierId, Trace,
+    TaskId, Trace,
     scheduler::get_runnable_tasks::{TaskScheduleChoice, get_eligible_scheduler_choices},
     sync_model::{BadSyncError, NotificationOutcome, SyncEvent, SyncInitEvent, SyncModelRegistry},
 };
@@ -29,10 +29,8 @@ pub(crate) struct Scheduler {
 
 struct Inner {
     next_task_id: u64,
-    next_task_start_barrier_id: u64,
     task_selector: TaskSelector,
     tasks: Vec<Task>,
-    task_start_barriers: Vec<TaskStartBarrier>,
     trace: Vec<(TaskId, String)>,
     sync_model: SyncModelRegistry,
 }
@@ -44,30 +42,10 @@ pub(crate) struct Task {
     state: TaskState,
 }
 
-pub(crate) struct TaskStartBarrier {
-    #[expect(dead_code, reason = "might be used")]
-    id: TaskStartBarrierId,
-    name: String,
-    num_tasks: usize,
-    num_tasks_started: usize,
-}
-
 #[derive(Debug)]
 enum TaskState {
-    // The task is registered, but not started.
-    Pending {
-        start_barrier: Option<TaskStartBarrierId>,
-    },
-    // The task is almost started, but waiting for other pending tasks with the same `barrier_id`.
-    WaitingAtStartBarrier {
-        barrier_id: TaskStartBarrierId,
-    },
-    // The task is ready to be executed (at the very beginning of the task code)
-    ReadyAtStart,
     // The task is ready to be executed (at suspension point)
-    ReadyAtPoint {
-        point: String,
-    },
+    Ready { point: String },
     // The task is currently running.
     // There can be more than one running task in case a task becomes blocked while it was running
     Running,
@@ -92,10 +70,8 @@ impl Scheduler {
         Arc::new(Scheduler {
             inner: Mutex::new(Inner {
                 next_task_id: 1,
-                next_task_start_barrier_id: 1,
                 task_selector,
                 tasks: Vec::new(),
-                task_start_barriers: Vec::new(),
                 trace: Vec::new(),
                 sync_model: SyncModelRegistry::new(),
             }),
@@ -125,29 +101,7 @@ impl Scheduler {
         }
     }
 
-    pub(crate) fn register_task_start_barrier(
-        &self,
-        name: &str,
-        num_tasks: usize,
-    ) -> TaskStartBarrierId {
-        let mut inner = self.lock();
-        let id = TaskStartBarrierId(NonZeroU64::new(inner.next_task_start_barrier_id).unwrap());
-        tracing::debug!("task start barrier {id:?} {name} registered");
-        inner.next_task_start_barrier_id += 1;
-        inner.task_start_barriers.push(TaskStartBarrier {
-            id,
-            name: name.to_string(),
-            num_tasks,
-            num_tasks_started: 0,
-        });
-        id
-    }
-
-    pub(crate) fn register_task(
-        &self,
-        name: &str,
-        start_barrier: Option<TaskStartBarrierId>,
-    ) -> TaskId {
+    pub(crate) fn register_task(&self, name: &str) -> TaskId {
         let mut inner = self.lock();
         let id = TaskId(NonZeroU64::new(inner.next_task_id).unwrap());
         tracing::debug!("task {id:?} {name} registered");
@@ -156,69 +110,13 @@ impl Scheduler {
             id,
             name: name.to_string(),
             prev_suspend_point: "(start)".to_string(),
-            state: if start_barrier.is_some() {
-                TaskState::Pending { start_barrier }
-            } else {
-                TaskState::Running
-            },
+            state: TaskState::Running,
         });
         id
     }
 
     fn task_idx(task_id: TaskId) -> usize {
         task_id.0.get() as usize - 1
-    }
-
-    pub(crate) async fn on_task_started(&self, task_id: TaskId) {
-        tracing::debug!("task {task_id:?} started");
-        {
-            let mut guard = self.lock();
-            let inner = &mut *guard;
-            let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
-            let start_barrier = match &task.state {
-                TaskState::Pending { start_barrier } => *start_barrier,
-                TaskState::WaitingAtStartBarrier { .. }
-                | TaskState::ReadyAtStart
-                | TaskState::ReadyAtPoint { .. }
-                | TaskState::Running
-                | TaskState::Finished => {
-                    panic!(
-                        "task {} {} is started, but its state is not Pending, but rather is {:?}.
-  This might mean that an internal task concurrency is happening (e.g., join or FuturesUnordered).
-  If this is the case, each spawned task must be wrapped with `task`",
-                        task.id.0, task.name, task.state
-                    );
-                }
-            };
-            task.state = if let Some(start_barrier) = start_barrier {
-                let barrier = inner
-                    .task_start_barriers
-                    .get_mut(usize::try_from(start_barrier.0.get() - 1).unwrap())
-                    .unwrap();
-                if barrier.num_tasks_started >= barrier.num_tasks {
-                    panic!("too much tasks started in barrier {}", barrier.name);
-                }
-                barrier.num_tasks_started += 1;
-                if barrier.num_tasks == barrier.num_tasks_started {
-                    tracing::debug!("all tasks started in barrier {}", barrier.name);
-                }
-                TaskState::WaitingAtStartBarrier {
-                    barrier_id: start_barrier,
-                }
-            } else {
-                TaskState::ReadyAtStart
-            };
-        }
-        self.scheduler_notify.notify_waiters();
-        loop {
-            self.task_notify.notified().await;
-            let mut inner = self.lock();
-            let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
-            if matches!(task.state, TaskState::Running) {
-                tracing::debug!("task {task_id:?} resumed from start");
-                break;
-            }
-        }
     }
 
     pub(crate) fn on_task_finished(&self, task_id: TaskId) {
@@ -282,11 +180,7 @@ impl Scheduler {
                         .trace
                         .push((task.id, format!("[{}->{name})", task.prev_suspend_point)));
                 }
-                TaskState::Pending { .. }
-                | TaskState::WaitingAtStartBarrier { .. }
-                | TaskState::ReadyAtStart
-                | TaskState::ReadyAtPoint { .. }
-                | TaskState::Finished => {
+                TaskState::Ready { .. } | TaskState::Finished => {
                     panic!(
 "task {} {} reached point {name}, but its state is not Running, but rather is {:?}.
   This might mean that an internal task concurrency is happening (e.g., join or FuturesUnordered).
@@ -295,7 +189,7 @@ impl Scheduler {
                 );
                 }
             }
-            task.state = TaskState::ReadyAtPoint {
+            task.state = TaskState::Ready {
                 point: name.to_string(),
             };
             drop(guard);
@@ -326,7 +220,7 @@ impl Scheduler {
         }
     }
 
-    pub(crate) async fn run_control_loop(&self, stop_barrier: Option<TaskStartBarrierId>) {
+    pub(crate) async fn run_control_loop(&self) {
         tracing::debug!("run control loop started");
         loop {
             let mut notified = pin!(self.scheduler_notify.notified());
@@ -347,18 +241,6 @@ impl Scheduler {
                         ))
                         .join(", ")
                 );
-                for task in &mut inner.tasks {
-                    if let TaskState::WaitingAtStartBarrier { barrier_id } = &task.state {
-                        let barrier = inner
-                            .task_start_barriers
-                            .get(usize::try_from(barrier_id.0.get() - 1).unwrap())
-                            .unwrap();
-                        if barrier.num_tasks_started == barrier.num_tasks {
-                            task.state = TaskState::ReadyAtStart;
-                            tracing::debug!("task {:?} is moved from Barrier to Ready", task.id);
-                        }
-                    }
-                }
                 let task_choices = {
                     let mut running_tasks = HashSet::new();
                     let mut suspended_tasks = HashSet::new();
@@ -367,13 +249,11 @@ impl Scheduler {
                             TaskState::Running => {
                                 running_tasks.insert(task.id);
                             }
-                            TaskState::ReadyAtStart | TaskState::ReadyAtPoint { .. } => {
+                            TaskState::Ready { .. } => {
                                 suspended_tasks.insert(task.id);
                             }
-                            TaskState::Pending { .. }
-                            | TaskState::WaitingAtStartBarrier { .. }
-                            | TaskState::Finished => {
-                                // TODO: these states are unnecessary
+                            TaskState::Finished => {
+                                // TODO: this state are unnecessary
                             }
                         }
                     }
@@ -397,14 +277,10 @@ impl Scheduler {
                                 &mut task.state,
                                 TaskState::Running,
                             ) {
-                                TaskState::ReadyAtPoint { point } => point,
-                                TaskState::ReadyAtStart => "start".to_string(),
-                                TaskState::Pending { .. }
-                                | TaskState::WaitingAtStartBarrier { .. }
-                                | TaskState::Running
-                                | TaskState::Finished => {
+                                TaskState::Ready { point } => point,
+                                TaskState::Running | TaskState::Finished => {
                                     panic!(
-                                        "task {} {} is selected to run, but its state was not ReadyAtPoint/ReadyAtStart, but rather is {:?}. This is an internal error in conc-checker.",
+                                        "task {} {} is selected to run, but its state was not Ready, but rather is {:?}. This is an internal error in conc-checker.",
                                         task.id.0, task.name, task.state
                                     );
                                 }
@@ -419,18 +295,6 @@ impl Scheduler {
                     tracing::debug!("run loop control: no tasks to resume");
                 }
 
-                if let Some(stop_barrier) = stop_barrier
-                    && let Some(barrier) = inner
-                        .task_start_barriers
-                        .get(usize::try_from(stop_barrier.0.get() - 1).unwrap())
-                    && barrier.num_tasks == barrier.num_tasks_started
-                    && inner
-                        .tasks
-                        .iter()
-                        .all(|task| matches!(task.state, TaskState::Finished))
-                {
-                    break;
-                }
                 drop(guard);
             }
 

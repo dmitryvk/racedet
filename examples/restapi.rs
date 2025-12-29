@@ -11,8 +11,7 @@ use axum::{
     routing::{get, post},
 };
 use conc_checker::{
-    SchedulerHandle, TaskStartBarrierId, execution_point, new_scheduler_with_start_task_barrier,
-    task,
+    SchedulerHandle, StartBarrier, execution_point, new_scheduler, task, with_start_barrier,
 };
 use futures::{FutureExt, future::BoxFuture};
 use hyper::StatusCode;
@@ -138,7 +137,7 @@ impl ConcCheckerLayer {
 }
 
 struct SchedulerRegistry {
-    schedulers: Mutex<HashMap<String, (SchedulerHandle, TaskStartBarrierId, CancellationToken)>>,
+    schedulers: Mutex<HashMap<String, (SchedulerHandle, StartBarrier, CancellationToken)>>,
 }
 
 impl SchedulerRegistry {
@@ -194,8 +193,12 @@ where
             let (scheduler, barrier, _) = self
                 .schedulers
                 .get_or_insert(header.scheduler_id, header.concurrent_task_count);
-            let task_id = scheduler.register_task(&header.task_id, Some(barrier));
-            conc_checker::with_scheduler(scheduler, task(task_id, self.inner.call(req))).boxed()
+            let task_id = scheduler.register_task(&header.task_id);
+            conc_checker::with_scheduler(
+                scheduler,
+                task(task_id, with_start_barrier(barrier, self.inner.call(req))),
+            )
+            .boxed()
         } else {
             self.inner.call(req).boxed()
         };
@@ -252,17 +255,21 @@ impl SchedulerRegistry {
         self: &Arc<Self>,
         id: String,
         task_count: usize,
-    ) -> (SchedulerHandle, TaskStartBarrierId, CancellationToken) {
+    ) -> (SchedulerHandle, StartBarrier, CancellationToken) {
         use std::collections::hash_map::Entry;
         let mut schedulers = self.schedulers.lock().unwrap();
         match schedulers.entry(id) {
             Entry::Occupied(entry) => {
                 let (scheduler, barrier, cancellation_token) = entry.get();
-                (scheduler.clone(), *barrier, cancellation_token.clone())
+                (
+                    scheduler.clone(),
+                    barrier.clone(),
+                    cancellation_token.clone(),
+                )
             }
             Entry::Vacant(entry) => {
-                let (scheduler, barrier, scheduler_fut) =
-                    new_scheduler_with_start_task_barrier("http requests", task_count);
+                let (scheduler, scheduler_fut) = new_scheduler();
+                let barrier = scheduler.new_start_barrier(task_count);
                 let cancellation_token = CancellationToken::new();
                 let id = entry.key().clone();
                 tokio::spawn({
@@ -282,7 +289,11 @@ impl SchedulerRegistry {
                 });
                 let (scheduler, barrier, cancellation_token) =
                     entry.insert((scheduler, barrier, cancellation_token));
-                (scheduler.clone(), *barrier, cancellation_token.clone())
+                (
+                    scheduler.clone(),
+                    barrier.clone(),
+                    cancellation_token.clone(),
+                )
             }
         }
     }

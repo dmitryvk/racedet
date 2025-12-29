@@ -19,9 +19,6 @@ pub struct RegisteredTaskId(Option<(Arc<Scheduler>, TaskId)>);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TaskId(NonZeroU64);
 
-#[derive(Clone, Copy, Debug)]
-pub struct TaskStartBarrierId(NonZeroU64);
-
 impl RegisteredTaskId {
     const INVALID: RegisteredTaskId = RegisteredTaskId(None);
 
@@ -64,21 +61,19 @@ pub async fn execution_point(name: &str) {
 }
 
 #[derive(Clone)]
-pub struct StartBarrier(Arc<Barrier>);
+pub struct StartBarrier(Option<Arc<Barrier>>);
 
-pub fn new_start_barrier(count: usize) -> StartBarrier {
-    use sync_model::start_barrier::{BarrierId, NewBarrier};
-    let start_barrier = Arc::new(Barrier::new(count));
-    sync_init_event(NewBarrier {
-        barrier: BarrierId::new(&start_barrier),
-        capacity: 2,
-    });
-    StartBarrier(start_barrier)
+pub fn new_start_barrier(task_count: usize) -> StartBarrier {
+    if let Some(scheduler) = current_scheduler() {
+        scheduler.new_start_barrier(task_count)
+    } else {
+        StartBarrier(None)
+    }
 }
 
 pub fn register_task(name: &str) -> RegisteredTaskId {
     if let Some(scheduler) = Scheduler::current() {
-        let task_id = scheduler.register_task(name, None);
+        let task_id = scheduler.register_task(name);
         RegisteredTaskId(Some((scheduler, task_id)))
     } else {
         RegisteredTaskId::INVALID
@@ -87,13 +82,15 @@ pub fn register_task(name: &str) -> RegisteredTaskId {
 
 pub async fn with_start_barrier<T>(barrier: StartBarrier, inner: impl Future<Output = T>) -> T {
     use sync_model::start_barrier::{BarrierId, CompletedBarrierWait, WaitingForBarrier};
-    tracing::debug!("sync_event barrier waiting");
-    sync_event(WaitingForBarrier(BarrierId::new(&barrier.0)));
-    execution_point("barrier").await;
-    tracing::debug!("barrier waiting");
-    barrier.0.wait().await;
-    tracing::debug!("barrier wait complete");
-    sync_event(CompletedBarrierWait(BarrierId::new(&barrier.0)));
+    if let StartBarrier(Some(barrier)) = barrier {
+        tracing::debug!("sync_event barrier waiting");
+        sync_event(WaitingForBarrier(BarrierId::new(&barrier)));
+        execution_point("barrier").await;
+        tracing::debug!("barrier waiting");
+        barrier.wait().await;
+        tracing::debug!("barrier wait complete");
+        sync_event(CompletedBarrierWait(BarrierId::new(&barrier)));
+    }
     inner.await
 }
 
@@ -129,24 +126,8 @@ pub fn new_scheduler() -> (SchedulerHandle, impl Future<Output = ()>) {
     let scheduler = SchedulerHandle(Scheduler::new(scheduler::TaskSelector::Random(
         RandomTaskSelector::new(),
     )));
-    let control_fut = scheduler.clone().run_control_loop(None);
+    let control_fut = scheduler.clone().run_control_loop();
     (scheduler, control_fut)
-}
-
-pub fn new_scheduler_with_start_task_barrier(
-    barrier_name: &str,
-    num_tasks: usize,
-) -> (
-    SchedulerHandle,
-    TaskStartBarrierId,
-    impl Future<Output = ()>,
-) {
-    let scheduler = SchedulerHandle(Scheduler::new(scheduler::TaskSelector::Random(
-        RandomTaskSelector::new(),
-    )));
-    let start_task_barrier = scheduler.register_task_start_barrier(barrier_name, num_tasks);
-    let control_fut = scheduler.clone().run_control_loop(Some(start_task_barrier));
-    (scheduler, start_task_barrier, control_fut)
 }
 
 pub fn current_scheduler() -> Option<SchedulerHandle> {
@@ -154,25 +135,29 @@ pub fn current_scheduler() -> Option<SchedulerHandle> {
 }
 
 impl SchedulerHandle {
-    pub fn register_task_start_barrier(&self, name: &str, num_tasks: usize) -> TaskStartBarrierId {
-        self.0.register_task_start_barrier(name, num_tasks)
-    }
-
-    pub fn register_task(
-        &self,
-        name: &str,
-        start_barrier: Option<TaskStartBarrierId>,
-    ) -> RegisteredTaskId {
-        let task_id = self.0.register_task(name, start_barrier);
+    pub fn register_task(&self, name: &str) -> RegisteredTaskId {
+        let task_id = self.0.register_task(name);
         RegisteredTaskId(Some((self.0.clone(), task_id)))
     }
 
-    async fn run_control_loop(self, stop_barrier: Option<TaskStartBarrierId>) {
-        self.0.run_control_loop(stop_barrier).await;
+    async fn run_control_loop(self) {
+        self.0.run_control_loop().await;
     }
 
     pub fn get_trace(&self) -> Trace {
         self.0.get_trace()
+    }
+
+    pub fn new_start_barrier(&self, task_count: usize) -> StartBarrier {
+        use sync_model::start_barrier::{BarrierId, NewBarrier};
+        let start_barrier = Arc::new(Barrier::new(task_count));
+        self.0
+            .on_sync_init_event(NewBarrier {
+                barrier: BarrierId::new(&start_barrier),
+                capacity: task_count,
+            })
+            .expect("should register succesfully");
+        StartBarrier(Some(start_barrier))
     }
 }
 
