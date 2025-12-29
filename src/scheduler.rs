@@ -12,7 +12,7 @@ use itertools::Itertools;
 use crate::{
     TaskId, TaskStartBarrierId, Trace,
     scheduler::get_runnable_tasks::{TaskScheduleChoice, get_eligible_scheduler_choices},
-    sync_model::{BadSyncError, NotificationOutcome, SyncEvent, SyncModelRegistry},
+    sync_model::{BadSyncError, NotificationOutcome, SyncEvent, SyncInitEvent, SyncModelRegistry},
 };
 
 mod get_runnable_tasks;
@@ -156,7 +156,11 @@ impl Scheduler {
             id,
             name: name.to_string(),
             prev_suspend_point: "(start)".to_string(),
-            state: TaskState::Pending { start_barrier },
+            state: if start_barrier.is_some() {
+                TaskState::Pending { start_barrier }
+            } else {
+                TaskState::Running
+            },
         });
         id
     }
@@ -237,6 +241,23 @@ impl Scheduler {
     ) -> Result<(), BadSyncError> {
         let mut inner = self.lock();
         match inner.sync_model.on_notified(task_id, event)? {
+            NotificationOutcome::Acknowledged => {
+                // do nothing
+            }
+            NotificationOutcome::ScheduleRequired => {
+                // TODO: force reschedule
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn on_sync_init_event<T: SyncInitEvent>(
+        &self,
+        event: T,
+    ) -> Result<(), BadSyncError> {
+        let mut inner = self.lock();
+        match inner.sync_model.on_init_event(event)? {
             NotificationOutcome::Acknowledged => {
                 // do nothing
             }

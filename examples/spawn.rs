@@ -2,10 +2,10 @@ use std::time::Duration;
 
 use conc_checker::{
     capture_panics::capture_panic,
-    current_scheduler, execution_point, maybe_with_scheduler, new_scheduler, register_task,
-    register_task_start_barrier, sync_event,
+    current_scheduler, execution_point, maybe_with_scheduler, new_scheduler, new_start_barrier,
+    register_task, sync_event,
     sync_model::join::{CompletedJoin, StartingJoin},
-    task, with_scheduler,
+    task, with_scheduler, with_start_barrier,
 };
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
 use tokio::spawn;
@@ -40,26 +40,26 @@ async fn main() {
 }
 
 async fn foo() {
-    task(register_task("bar", None), bar()).await;
+    task(register_task("bar"), bar()).await;
 }
 
 async fn bar() {
     execution_point("before spawn").await;
 
     // task_join means that the current task is waiting for nested tasks and should not be scheduled in of itself (but other tasks should be scheduled instead)
-    let start_barrier_1 = register_task_start_barrier("1", 2);
+    let barrier = new_start_barrier(2);
     let task_a = spawn(maybe_with_scheduler(
         current_scheduler(),
         task(
-            register_task("spawn a", start_barrier_1),
-            execution_point("a"),
+            register_task("spawn a"),
+            with_start_barrier(barrier.clone(), execution_point("a")),
         ),
     ));
     let task_b = spawn(maybe_with_scheduler(
         current_scheduler(),
         task(
-            register_task("spawn b", start_barrier_1),
-            execution_point("b"),
+            register_task("spawn b"),
+            with_start_barrier(barrier.clone(), execution_point("b")),
         ),
     ));
     tracing::debug!("sync_event starting join");

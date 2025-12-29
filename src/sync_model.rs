@@ -24,6 +24,7 @@ use crate::TaskId;
 pub mod join;
 pub mod mutex;
 pub mod rwlock;
+pub mod start_barrier;
 
 pub(crate) struct SyncModelRegistry {
     sync_models: HashMap<TypeId, Box<dyn DynSyncModel>>,
@@ -59,6 +60,14 @@ impl SyncModelRegistry {
         sync_model.on_notified(task_id, event)
     }
 
+    pub(crate) fn on_init_event<TEvent: SyncInitEvent>(
+        &mut self,
+        event: TEvent,
+    ) -> Result<NotificationOutcome, BadSyncError> {
+        let sync_model = self.get_sync_model_mut::<TEvent::Model>();
+        sync_model.on_init_event(event)
+    }
+
     pub(crate) fn task_progress_dependencies(&self, task_id: TaskId) -> TaskProgressDependencies {
         self.iter_models()
             .map(|model| model.task_progress_dependencies(task_id))
@@ -81,6 +90,14 @@ pub trait ProcessSyncEvent<TOp: SyncEvent>: SyncModel {
         task_id: TaskId,
         event: TOp,
     ) -> Result<NotificationOutcome, BadSyncError>;
+}
+
+pub trait ProcessSyncInitEvent<TOp: SyncInitEvent>: SyncModel {
+    fn on_init_event(&mut self, event: TOp) -> Result<NotificationOutcome, BadSyncError>;
+}
+
+pub trait SyncInitEvent: Sized {
+    type Model: ProcessSyncInitEvent<Self>;
 }
 
 pub trait SyncEvent: Sized {

@@ -5,8 +5,8 @@ use conc_checker::capture_panics::capture_panic;
 use conc_checker::sync_model::rwlock::{
     LockedRwlock, LockingRwlock, ReleasedRwlock, RwlockId, RwlockMode,
 };
-use conc_checker::{execution_point, register_task, task};
-use conc_checker::{new_scheduler, register_task_start_barrier, sync_event, with_scheduler};
+use conc_checker::{execution_point, new_start_barrier, register_task, task, with_start_barrier};
+use conc_checker::{new_scheduler, sync_event, with_scheduler};
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
 use tokio::join;
 use tokio::sync::RwLock;
@@ -43,27 +43,27 @@ async fn main() {
 async fn foo() {
     execution_point("before").await;
 
-    let barrier = register_task_start_barrier("start", 4);
+    let barrier = new_start_barrier(4);
 
     let var = Arc::new(RwLock::new(1));
     let rwlock_id = RwlockId::new("rwlock".to_string());
 
     join!(
         task(
-            register_task("r1", barrier),
-            do_read(var.clone(), rwlock_id.clone())
+            register_task("r1"),
+            with_start_barrier(barrier.clone(), do_read(var.clone(), rwlock_id.clone()))
         ),
         task(
-            register_task("r2", barrier),
-            do_read(var.clone(), rwlock_id.clone())
+            register_task("r2"),
+            with_start_barrier(barrier.clone(), do_read(var.clone(), rwlock_id.clone()))
         ),
         task(
-            register_task("w1", barrier),
-            do_write(var.clone(), rwlock_id.clone())
+            register_task("w1"),
+            with_start_barrier(barrier.clone(), do_write(var.clone(), rwlock_id.clone()))
         ),
         task(
-            register_task("w2", barrier),
-            do_write(var.clone(), rwlock_id.clone())
+            register_task("w2"),
+            with_start_barrier(barrier.clone(), do_write(var.clone(), rwlock_id.clone()))
         ),
     );
 

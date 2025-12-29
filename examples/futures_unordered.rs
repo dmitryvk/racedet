@@ -42,14 +42,14 @@ async fn main() {
 async fn foo() {
     let futs: FuturesUnordered<_> = (0..3)
         .map(|i| async move {
-            task(register_task(&format!("fut {i}"), None), async {
+            task(register_task(&format!("fut {i}")), async {
                 execution_point("a").await;
                 i
             })
             .await
         })
         .collect();
-    let mut results: Vec<_> = task(register_task("main", None), async {
+    let mut results: Vec<_> = task(register_task("main"), async {
         tracing::debug!("sync_event starting collect");
         sync_event(StartingJoin);
         tracing::debug!("starting collect");

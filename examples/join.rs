@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use conc_checker::capture_panics::capture_panic;
 use conc_checker::sync_model::join::{CompletedJoin, StartingJoin};
-use conc_checker::{execution_point, register_task, task};
-use conc_checker::{new_scheduler, register_task_start_barrier, sync_event, with_scheduler};
+use conc_checker::{execution_point, new_start_barrier, register_task, task, with_start_barrier};
+use conc_checker::{new_scheduler, sync_event, with_scheduler};
 use futures::FutureExt;
 use futures::select;
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
@@ -39,39 +39,40 @@ async fn main() {
 }
 
 async fn foo() {
-    task(register_task("bar", None), bar()).await;
+    task(register_task("bar"), bar()).await;
 }
 
 async fn bar() {
     execution_point("spawn tasks").await;
 
     // task_join means that the current task is waiting for nested tasks and should not be scheduled in of itself (but other tasks should be scheduled instead)
-    let start_barrier_1 = register_task_start_barrier("1", 2);
-    let task_a = register_task("a", start_barrier_1);
-    let task_b = register_task("b", start_barrier_1);
+    let barrier = new_start_barrier(2);
     tracing::debug!("sync_event starting join");
     sync_event(StartingJoin);
     tracing::debug!("starting join");
     join!(
-        task(task_a, execution_point("a")),
-        task(task_b, execution_point("b"))
+        task(
+            register_task("a"),
+            with_start_barrier(barrier.clone(), execution_point("a"))
+        ),
+        task(
+            register_task("b"),
+            with_start_barrier(barrier.clone(), execution_point("b"))
+        )
     );
     tracing::debug!("joined");
     sync_event(CompletedJoin);
     execution_point("joined").await;
     tracing::info!("ok");
     execution_point("select start").await;
-    let start_barrier_2 = register_task_start_barrier("2", 3);
-    let task_c = register_task("c", start_barrier_2);
-    let task_d = register_task("d", start_barrier_2);
-    let task_sleep = register_task("sleep", start_barrier_2);
+    let barrier = new_start_barrier(3);
     tracing::debug!("sync_event starting select");
     sync_event(StartingJoin);
     tracing::debug!("starting select");
     select! {
-        _ = task(task_c, execution_point("c")).fuse() => {},
-        _ = task(task_d, execution_point("d")).fuse() => {},
-        _ = task(task_sleep, sleep(Duration::from_millis(10))).fuse() => {}
+        _ = task(register_task("c"), with_start_barrier(barrier.clone(), execution_point("c"))).fuse() => {},
+        _ = task(register_task("d"), with_start_barrier(barrier.clone(), execution_point("d"))).fuse() => {},
+        _ = task(register_task("sleep"), with_start_barrier(barrier.clone(), sleep(Duration::from_millis(10)))).fuse() => {}
     }
     tracing::debug!("done select");
     sync_event(CompletedJoin);
