@@ -1,8 +1,7 @@
 use std::time::Duration;
 
 use conc_checker::{
-    capture_panics::capture_panic, execution_point, new_scheduler, register_task, task,
-    with_scheduler,
+    capture_panics::capture_panic, execution_point, new_scheduler, task, with_scheduler,
 };
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
 use tokio::join;
@@ -37,7 +36,7 @@ async fn main() {
 }
 
 async fn foo() {
-    task(register_task("bar"), bar()).await;
+    task("bar", bar()).await;
 }
 
 async fn bar() {

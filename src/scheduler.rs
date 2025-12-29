@@ -101,14 +101,14 @@ impl Scheduler {
         }
     }
 
-    pub(crate) fn register_task(&self, name: &str) -> TaskId {
+    pub(crate) fn register_task(&self, name: String) -> TaskId {
         let mut inner = self.lock();
         let id = TaskId(NonZeroU64::new(inner.next_task_id).unwrap());
         tracing::debug!("task {id:?} {name} registered");
         inner.next_task_id += 1;
         inner.tasks.push(Task {
             id,
-            name: name.to_string(),
+            name,
             prev_suspend_point: "(start)".to_string(),
             state: TaskState::Running,
         });

@@ -193,10 +193,12 @@ where
             let (scheduler, barrier, _) = self
                 .schedulers
                 .get_or_insert(header.scheduler_id, header.concurrent_task_count);
-            let task_id = scheduler.register_task(&header.task_id);
             conc_checker::with_scheduler(
                 scheduler,
-                task(task_id, with_start_barrier(barrier, self.inner.call(req))),
+                task(
+                    header.task_id,
+                    with_start_barrier(barrier, self.inner.call(req)),
+                ),
             )
             .boxed()
         } else {

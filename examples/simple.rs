@@ -4,8 +4,8 @@ use std::{
 };
 
 use conc_checker::{
-    capture_panics::capture_panic, execution_point, new_scheduler, new_start_barrier,
-    register_task, task, with_scheduler, with_start_barrier,
+    capture_panics::capture_panic, execution_point, new_scheduler, new_start_barrier, task,
+    with_scheduler, with_start_barrier,
 };
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
 use tokio::join;
@@ -42,11 +42,9 @@ async fn main() {
 async fn foo() {
     let var = Arc::new(AtomicI64::new(0));
     let barrier = new_start_barrier(2);
-    let bar1 = register_task("bar");
-    let bar2 = register_task("bar");
     join!(
-        task(bar1, with_start_barrier(barrier.clone(), bar(var.clone()))),
-        task(bar2, with_start_barrier(barrier.clone(), bar(var.clone())))
+        task("bar", with_start_barrier(barrier.clone(), bar(var.clone()))),
+        task("bar", with_start_barrier(barrier.clone(), bar(var.clone())))
     );
     assert_eq!(2, var.load(std::sync::atomic::Ordering::Relaxed));
 }

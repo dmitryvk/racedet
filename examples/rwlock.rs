@@ -5,7 +5,7 @@ use conc_checker::capture_panics::capture_panic;
 use conc_checker::sync_model::rwlock::{
     LockedRwlock, LockingRwlock, ReleasedRwlock, RwlockId, RwlockMode,
 };
-use conc_checker::{execution_point, new_start_barrier, register_task, task, with_start_barrier};
+use conc_checker::{execution_point, new_start_barrier, task, with_start_barrier};
 use conc_checker::{new_scheduler, sync_event, with_scheduler};
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
 use tokio::join;
@@ -50,19 +50,19 @@ async fn foo() {
 
     join!(
         task(
-            register_task("r1"),
+            "r1",
             with_start_barrier(barrier.clone(), do_read(var.clone(), rwlock_id.clone()))
         ),
         task(
-            register_task("r2"),
+            "r2",
             with_start_barrier(barrier.clone(), do_read(var.clone(), rwlock_id.clone()))
         ),
         task(
-            register_task("w1"),
+            "w1",
             with_start_barrier(barrier.clone(), do_write(var.clone(), rwlock_id.clone()))
         ),
         task(
-            register_task("w2"),
+            "w2",
             with_start_barrier(barrier.clone(), do_write(var.clone(), rwlock_id.clone()))
         ),
     );

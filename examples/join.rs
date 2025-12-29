@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use conc_checker::capture_panics::capture_panic;
 use conc_checker::sync_model::join::{CompletedJoin, StartingJoin};
-use conc_checker::{execution_point, new_start_barrier, register_task, task, with_start_barrier};
+use conc_checker::{execution_point, new_start_barrier, task, with_start_barrier};
 use conc_checker::{new_scheduler, sync_event, with_scheduler};
 use futures::FutureExt;
 use futures::select;
@@ -39,7 +39,7 @@ async fn main() {
 }
 
 async fn foo() {
-    task(register_task("bar"), bar()).await;
+    task("bar", bar()).await;
 }
 
 async fn bar() {
@@ -52,11 +52,11 @@ async fn bar() {
     tracing::debug!("starting join");
     join!(
         task(
-            register_task("a"),
+            "a",
             with_start_barrier(barrier.clone(), execution_point("a"))
         ),
         task(
-            register_task("b"),
+            "b",
             with_start_barrier(barrier.clone(), execution_point("b"))
         )
     );
@@ -70,9 +70,9 @@ async fn bar() {
     sync_event(StartingJoin);
     tracing::debug!("starting select");
     select! {
-        _ = task(register_task("c"), with_start_barrier(barrier.clone(), execution_point("c"))).fuse() => {},
-        _ = task(register_task("d"), with_start_barrier(barrier.clone(), execution_point("d"))).fuse() => {},
-        _ = task(register_task("sleep"), with_start_barrier(barrier.clone(), sleep(Duration::from_millis(10)))).fuse() => {}
+        _ = task("c", with_start_barrier(barrier.clone(), execution_point("c"))).fuse() => {},
+        _ = task("d", with_start_barrier(barrier.clone(), execution_point("d"))).fuse() => {},
+        _ = task("sleep", with_start_barrier(barrier.clone(), sleep(Duration::from_millis(10)))).fuse() => {}
     }
     tracing::debug!("done select");
     sync_event(CompletedJoin);

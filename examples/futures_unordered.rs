@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use conc_checker::{
     capture_panics::capture_panic,
-    execution_point, new_scheduler, register_task, sync_event,
+    execution_point, new_scheduler, sync_event,
     sync_model::join::{CompletedJoin, StartingJoin},
     task, with_scheduler,
 };
@@ -42,14 +42,14 @@ async fn main() {
 async fn foo() {
     let futs: FuturesUnordered<_> = (0..3)
         .map(|i| async move {
-            task(register_task(&format!("fut {i}")), async {
+            task(format!("fut {i}"), async {
                 execution_point("a").await;
                 i
             })
             .await
         })
         .collect();
-    let mut results: Vec<_> = task(register_task("main"), async {
+    let mut results: Vec<_> = task("main", async {
         tracing::debug!("sync_event starting collect");
         sync_event(StartingJoin);
         tracing::debug!("starting collect");

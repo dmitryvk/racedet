@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use conc_checker::capture_panics::capture_panic;
 use conc_checker::sync_model::mutex::{LockedMutex, LockingMutex, MutexId, ReleasedMutex};
-use conc_checker::{execution_point, new_start_barrier, register_task, task, with_start_barrier};
+use conc_checker::{execution_point, new_start_barrier, task, with_start_barrier};
 use conc_checker::{new_scheduler, sync_event, with_scheduler};
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
 use tokio::join;
@@ -48,11 +48,11 @@ async fn foo() {
 
     join!(
         task(
-            register_task("inc1"),
+            "inc1",
             with_start_barrier(barrier.clone(), do_inc(var.clone(), mutex_id.clone()))
         ),
         task(
-            register_task("inc2"),
+            "inc2",
             with_start_barrier(barrier.clone(), do_inc(var.clone(), mutex_id.clone()))
         ),
     );

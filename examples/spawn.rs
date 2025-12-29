@@ -3,7 +3,7 @@ use std::time::Duration;
 use conc_checker::{
     capture_panics::capture_panic,
     current_scheduler, execution_point, maybe_with_scheduler, new_scheduler, new_start_barrier,
-    register_task, sync_event,
+    sync_event,
     sync_model::join::{CompletedJoin, StartingJoin},
     task, with_scheduler, with_start_barrier,
 };
@@ -40,7 +40,7 @@ async fn main() {
 }
 
 async fn foo() {
-    task(register_task("bar"), bar()).await;
+    task("bar", bar()).await;
 }
 
 async fn bar() {
@@ -51,14 +51,14 @@ async fn bar() {
     let task_a = spawn(maybe_with_scheduler(
         current_scheduler(),
         task(
-            register_task("spawn a"),
+            "spawn a",
             with_start_barrier(barrier.clone(), execution_point("a")),
         ),
     ));
     let task_b = spawn(maybe_with_scheduler(
         current_scheduler(),
         task(
-            register_task("spawn b"),
+            "spawn b",
             with_start_barrier(barrier.clone(), execution_point("b")),
         ),
     ));

@@ -13,27 +13,8 @@ mod executor;
 mod scheduler;
 pub mod sync_model;
 
-#[derive(Clone)]
-pub struct RegisteredTaskId(Option<(Arc<Scheduler>, TaskId)>);
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TaskId(NonZeroU64);
-
-impl RegisteredTaskId {
-    const INVALID: RegisteredTaskId = RegisteredTaskId(None);
-
-    fn into_parts(mut self) -> Option<(Arc<Scheduler>, TaskId)> {
-        self.0.take()
-    }
-}
-
-impl Drop for RegisteredTaskId {
-    fn drop(&mut self) {
-        if let Some((scheduler, task_id)) = self.0.take() {
-            scheduler.on_task_finished(task_id);
-        }
-    }
-}
 
 pub fn sync_event<T: SyncEvent>(event: T) {
     if let Some(scheduler) = Scheduler::current()
@@ -71,15 +52,6 @@ pub fn new_start_barrier(task_count: usize) -> StartBarrier {
     }
 }
 
-pub fn register_task(name: &str) -> RegisteredTaskId {
-    if let Some(scheduler) = Scheduler::current() {
-        let task_id = scheduler.register_task(name);
-        RegisteredTaskId(Some((scheduler, task_id)))
-    } else {
-        RegisteredTaskId::INVALID
-    }
-}
-
 pub async fn with_start_barrier<T>(barrier: StartBarrier, inner: impl Future<Output = T>) -> T {
     use sync_model::start_barrier::{BarrierId, CompletedBarrierWait, WaitingForBarrier};
     if let StartBarrier(Some(barrier)) = barrier {
@@ -94,9 +66,10 @@ pub async fn with_start_barrier<T>(barrier: StartBarrier, inner: impl Future<Out
     inner.await
 }
 
-pub async fn task<T>(task_id: RegisteredTaskId, inner: impl Future<Output = T>) -> T {
+pub async fn task<T>(name: impl Into<String>, inner: impl Future<Output = T>) -> T {
     let _guard;
-    let task_id = if let Some((scheduler, task_id)) = task_id.into_parts() {
+    let task_id = if let Some(scheduler) = Scheduler::current() {
+        let task_id = scheduler.register_task(name.into());
         _guard = TaskFinishedGuard {
             task_id,
             scheduler: scheduler.clone(),
@@ -135,11 +108,6 @@ pub fn current_scheduler() -> Option<SchedulerHandle> {
 }
 
 impl SchedulerHandle {
-    pub fn register_task(&self, name: &str) -> RegisteredTaskId {
-        let task_id = self.0.register_task(name);
-        RegisteredTaskId(Some((self.0.clone(), task_id)))
-    }
-
     async fn run_control_loop(self) {
         self.0.run_control_loop().await;
     }
