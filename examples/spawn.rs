@@ -50,17 +50,11 @@ async fn bar() {
     let barrier = new_start_barrier(2);
     let task_a = spawn(maybe_with_scheduler(
         current_scheduler(),
-        task(
-            "spawn a",
-            with_start_barrier(barrier.clone(), execution_point("a")),
-        ),
+        task("spawn a", with_start_barrier(barrier.clone(), baz(1))),
     ));
     let task_b = spawn(maybe_with_scheduler(
         current_scheduler(),
-        task(
-            "spawn b",
-            with_start_barrier(barrier.clone(), execution_point("b")),
-        ),
+        task("spawn b", with_start_barrier(barrier.clone(), baz(2))),
     ));
     tracing::debug!("sync_event starting join");
     sync_event(StartingJoin);
@@ -71,4 +65,20 @@ async fn bar() {
     sync_event(CompletedJoin);
     tracing::info!("ok");
     execution_point("joined").await;
+}
+
+async fn baz(n: u32) {
+    execution_point("a1").await;
+    sync_event(StartingJoin);
+    // TODO: spawned tasks receive different task ids depending on interleaving:
+    // - start 4 spawn baz 2
+    // - start 4 spawn baz 1
+    spawn(maybe_with_scheduler(
+        current_scheduler(),
+        task(format!("spawn baz {n}"), execution_point("q")),
+    ))
+    .await
+    .unwrap();
+    sync_event(CompletedJoin);
+    execution_point("a2").await;
 }
