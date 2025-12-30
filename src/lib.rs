@@ -1,10 +1,11 @@
 use std::{num::NonZeroU64, sync::Arc, task::Poll};
 
+use futures::executor::block_on;
 use pin_project::pin_project;
 use tokio::sync::Barrier;
 
 use crate::{
-    executor::TaskFuture,
+    executor::{CurrentTaskIdGuard, TaskFuture},
     scheduler::{RandomTaskSelector, Scheduler},
     sync_model::{SyncEvent, SyncInitEvent},
     trace::Trace,
@@ -43,6 +44,10 @@ pub async fn execution_point(name: &str) {
     }
 }
 
+pub fn execution_point_blocking(name: &str) {
+    block_on(execution_point(name));
+}
+
 #[derive(Clone)]
 pub struct StartBarrier(Option<Arc<Barrier>>);
 
@@ -55,6 +60,11 @@ pub fn new_start_barrier(task_count: usize) -> StartBarrier {
 }
 
 pub async fn with_start_barrier<T>(barrier: StartBarrier, inner: impl Future<Output = T>) -> T {
+    wait_for_start_barrier(barrier).await;
+    inner.await
+}
+
+async fn wait_for_start_barrier(barrier: StartBarrier) {
     use sync_model::start_barrier::{BarrierId, CompletedBarrierWait, WaitingForBarrier};
     if let StartBarrier(Some(barrier)) = barrier {
         tracing::debug!("sync_event barrier waiting");
@@ -65,7 +75,11 @@ pub async fn with_start_barrier<T>(barrier: StartBarrier, inner: impl Future<Out
         tracing::debug!("barrier wait complete");
         sync_event(CompletedBarrierWait(BarrierId::new(&barrier)));
     }
-    inner.await
+}
+
+pub fn with_start_barrier_blocking<T>(barrier: StartBarrier, inner: impl FnOnce() -> T) -> T {
+    block_on(wait_for_start_barrier(barrier));
+    inner()
 }
 
 pub async fn task<T>(name: impl Into<String>, inner: impl Future<Output = T>) -> T {
@@ -81,6 +95,21 @@ pub async fn task<T>(name: impl Into<String>, inner: impl Future<Output = T>) ->
         None
     };
     TaskFuture::new(inner, task_id).await
+}
+
+pub fn task_blocking<T>(name: impl Into<String>, inner: impl FnOnce() -> T) -> T {
+    let _guard;
+    if let Some(scheduler) = Scheduler::current() {
+        let task_id = scheduler.register_task(name.into());
+        _guard = (
+            TaskFinishedGuard {
+                task_id,
+                scheduler: scheduler.clone(),
+            },
+            CurrentTaskIdGuard::install(task_id),
+        );
+    };
+    inner()
 }
 
 struct TaskFinishedGuard {
@@ -146,6 +175,17 @@ pub fn maybe_with_scheduler<Fut>(
         scheduler: scheduler.map(|handle| handle.0),
         inner,
     }
+}
+
+pub fn maybe_with_scheduler_blocking<T>(
+    scheduler: Option<SchedulerHandle>,
+    inner: impl FnOnce() -> T,
+) -> T {
+    let _guard;
+    if let Some(scheduler) = scheduler {
+        _guard = scheduler.0.set_current();
+    }
+    inner()
 }
 
 #[pin_project]

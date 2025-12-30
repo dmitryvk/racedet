@@ -35,12 +35,12 @@ pub(crate) fn current_task() -> Option<TaskId> {
     CURRENT_TASK.with_borrow(|t| *t)
 }
 
-struct CurrentTaskIdGuard {
+pub(crate) struct CurrentTaskIdGuard {
     old_value: Option<TaskId>,
 }
 
 impl CurrentTaskIdGuard {
-    fn install(task_id: TaskId) -> Self {
+    pub(crate) fn install(task_id: TaskId) -> Self {
         let old_value = CURRENT_TASK.replace(Some(task_id));
         Self { old_value }
     }
