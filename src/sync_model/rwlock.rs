@@ -79,7 +79,7 @@ impl SyncEvent for ReleasedRwlock {
 }
 
 impl ProcessSyncEvent<LockingRwlock> for RwlockModel {
-    fn on_notified(
+    fn on_event(
         &mut self,
         task_id: TaskId,
         LockingRwlock(lock_id, lock_mode): LockingRwlock,
@@ -93,7 +93,7 @@ impl ProcessSyncEvent<LockingRwlock> for RwlockModel {
 }
 
 impl ProcessSyncEvent<AbortedLockingRwlock> for RwlockModel {
-    fn on_notified(
+    fn on_event(
         &mut self,
         task_id: TaskId,
         AbortedLockingRwlock(lock_id, lock_mode): AbortedLockingRwlock,
@@ -115,7 +115,7 @@ impl ProcessSyncEvent<AbortedLockingRwlock> for RwlockModel {
 }
 
 impl ProcessSyncEvent<LockedRwlock> for RwlockModel {
-    fn on_notified(
+    fn on_event(
         &mut self,
         task_id: TaskId,
         LockedRwlock(lock_id, lock_mode): LockedRwlock,
@@ -156,7 +156,7 @@ impl ProcessSyncEvent<LockedRwlock> for RwlockModel {
 }
 
 impl ProcessSyncEvent<ReleasedRwlock> for RwlockModel {
-    fn on_notified(
+    fn on_event(
         &mut self,
         task_id: TaskId,
         ReleasedRwlock(lock_id, lock_mode): ReleasedRwlock,

@@ -24,7 +24,7 @@ impl SyncEvent for CompletedJoin {
 }
 
 impl ProcessSyncEvent<StartingJoin> for TaskJoinModel {
-    fn on_notified(
+    fn on_event(
         &mut self,
         task_id: TaskId,
         _event: StartingJoin,
@@ -38,7 +38,7 @@ impl ProcessSyncEvent<StartingJoin> for TaskJoinModel {
 }
 
 impl ProcessSyncEvent<CompletedJoin> for TaskJoinModel {
-    fn on_notified(
+    fn on_event(
         &mut self,
         task_id: TaskId,
         _event: CompletedJoin,

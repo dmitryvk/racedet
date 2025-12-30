@@ -25,6 +25,7 @@ pub mod join;
 pub mod mutex;
 pub mod rwlock;
 pub mod start_barrier;
+pub mod watch;
 
 pub(crate) struct SyncModelRegistry {
     sync_models: HashMap<TypeId, Box<dyn DynSyncModel>>,
@@ -57,7 +58,7 @@ impl SyncModelRegistry {
         event: TEvent,
     ) -> Result<NotificationOutcome, BadSyncError> {
         let sync_model = self.get_sync_model_mut::<TEvent::Model>();
-        sync_model.on_notified(task_id, event)
+        sync_model.on_event(task_id, event)
     }
 
     pub(crate) fn on_init_event<TEvent: SyncInitEvent>(
@@ -85,7 +86,7 @@ pub trait DynSyncModel: Any + Send + Sync + 'static {
 pub trait SyncModel: DynSyncModel + Default {}
 
 pub trait ProcessSyncEvent<TOp: SyncEvent>: SyncModel {
-    fn on_notified(
+    fn on_event(
         &mut self,
         task_id: TaskId,
         event: TOp,
@@ -219,7 +220,7 @@ mod tests {
     }
 
     impl ProcessSyncEvent<TakingLock> for LockModel {
-        fn on_notified(
+        fn on_event(
             &mut self,
             task_id: TaskId,
             TakingLock(lock_id): TakingLock,
@@ -237,7 +238,7 @@ mod tests {
         }
     }
     impl ProcessSyncEvent<AbortTakingLock> for LockModel {
-        fn on_notified(
+        fn on_event(
             &mut self,
             task_id: TaskId,
             AbortTakingLock(lock_id): AbortTakingLock,
@@ -251,7 +252,7 @@ mod tests {
         }
     }
     impl ProcessSyncEvent<LockTaken> for LockModel {
-        fn on_notified(
+        fn on_event(
             &mut self,
             task_id: TaskId,
             LockTaken(lock_id): LockTaken,
@@ -267,7 +268,7 @@ mod tests {
         }
     }
     impl ProcessSyncEvent<LockReleased> for LockModel {
-        fn on_notified(
+        fn on_event(
             &mut self,
             task_id: TaskId,
             LockReleased(lock_id): LockReleased,

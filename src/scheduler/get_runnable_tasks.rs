@@ -338,7 +338,7 @@ mod tests {
         type Model = TestSyncModel;
     }
     impl ProcessSyncEvent<ProvideDeps> for TestSyncModel {
-        fn on_notified(
+        fn on_event(
             &mut self,
             task_id: TaskId,
             ProvideDeps(deps): ProvideDeps,

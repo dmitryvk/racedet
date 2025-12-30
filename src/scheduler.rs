@@ -168,7 +168,7 @@ impl Scheduler {
                 // do nothing
             }
             NotificationOutcome::ScheduleRequired => {
-                // TODO: force reschedule
+                todo!();
             }
         }
 
@@ -185,7 +185,7 @@ impl Scheduler {
                 // do nothing
             }
             NotificationOutcome::ScheduleRequired => {
-                // TODO: force reschedule
+                todo!();
             }
         }
 
@@ -222,13 +222,17 @@ impl Scheduler {
         }
         self.scheduler_notify.notify_waiters();
         loop {
-            self.task_notify.notified().await;
-            let mut inner = self.lock();
-            let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
-            if matches!(task.state, TaskState::Running) {
-                tracing::debug!("task {task_id:?} resumed from {name}");
-                break;
+            let mut notified = pin!(self.task_notify.notified());
+            notified.as_mut().enable();
+            {
+                let mut inner = self.lock();
+                let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
+                if matches!(task.state, TaskState::Running) {
+                    tracing::debug!("task {task_id:?} resumed from {name}");
+                    break;
+                }
             }
+            notified.await;
         }
     }
 

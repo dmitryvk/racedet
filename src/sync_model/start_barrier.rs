@@ -98,7 +98,7 @@ impl ProcessSyncInitEvent<NewBarrier> for BarrierModel {
 }
 
 impl ProcessSyncEvent<WaitingForBarrier> for BarrierModel {
-    fn on_notified(
+    fn on_event(
         &mut self,
         task_id: TaskId,
         WaitingForBarrier(barrier_id): WaitingForBarrier,
@@ -123,7 +123,7 @@ impl ProcessSyncEvent<WaitingForBarrier> for BarrierModel {
 }
 
 impl ProcessSyncEvent<AbortedWaitingForBarrier> for BarrierModel {
-    fn on_notified(
+    fn on_event(
         &mut self,
         task_id: TaskId,
         AbortedWaitingForBarrier(barrier_id): AbortedWaitingForBarrier,
@@ -142,7 +142,7 @@ impl ProcessSyncEvent<AbortedWaitingForBarrier> for BarrierModel {
 }
 
 impl ProcessSyncEvent<CompletedBarrierWait> for BarrierModel {
-    fn on_notified(
+    fn on_event(
         &mut self,
         task_id: TaskId,
         CompletedBarrierWait(barrier_id): CompletedBarrierWait,

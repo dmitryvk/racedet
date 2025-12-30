@@ -58,7 +58,7 @@ impl SyncEvent for ReleasedMutex {
 }
 
 impl ProcessSyncEvent<LockingMutex> for MutexModel {
-    fn on_notified(
+    fn on_event(
         &mut self,
         task_id: TaskId,
         LockingMutex(lock_id): LockingMutex,
@@ -81,7 +81,7 @@ impl ProcessSyncEvent<LockingMutex> for MutexModel {
 }
 
 impl ProcessSyncEvent<AbortedLockingMutex> for MutexModel {
-    fn on_notified(
+    fn on_event(
         &mut self,
         task_id: TaskId,
         AbortedLockingMutex(lock_id): AbortedLockingMutex,
@@ -103,7 +103,7 @@ impl ProcessSyncEvent<AbortedLockingMutex> for MutexModel {
 }
 
 impl ProcessSyncEvent<LockedMutex> for MutexModel {
-    fn on_notified(
+    fn on_event(
         &mut self,
         task_id: TaskId,
         LockedMutex(lock_id): LockedMutex,
@@ -126,7 +126,7 @@ impl ProcessSyncEvent<LockedMutex> for MutexModel {
 }
 
 impl ProcessSyncEvent<ReleasedMutex> for MutexModel {
-    fn on_notified(
+    fn on_event(
         &mut self,
         task_id: TaskId,
         ReleasedMutex(lock_id): ReleasedMutex,
