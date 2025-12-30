@@ -168,7 +168,9 @@ impl Scheduler {
                 // do nothing
             }
             NotificationOutcome::ScheduleRequired => {
-                todo!();
+                tracing::debug!("scheduler_notify.notify_waiters before");
+                self.scheduler_notify.notify_waiters();
+                tracing::debug!("scheduler_notify.notify_waiters done");
             }
         }
 
@@ -185,7 +187,7 @@ impl Scheduler {
                 // do nothing
             }
             NotificationOutcome::ScheduleRequired => {
-                todo!();
+                self.scheduler_notify.notify_waiters();
             }
         }
 

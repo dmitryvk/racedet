@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use conc_checker::{
     capture_panics::capture_panic,
@@ -7,7 +7,10 @@ use conc_checker::{
     task, with_scheduler, with_start_barrier,
 };
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
-use tokio::{join, sync::watch::Sender};
+use tokio::{
+    join,
+    sync::watch::{Receiver, Sender},
+};
 
 #[tokio::main]
 async fn main() {
@@ -40,55 +43,59 @@ async fn main() {
 
 async fn foo() {
     let barrier = new_start_barrier(3);
-    let (tx, _) = tokio::sync::watch::channel(1);
-    let watch = Arc::new(tx);
+    let (tx, rx) = tokio::sync::watch::channel(1);
     join!(
         task(
             "producer",
-            with_start_barrier(barrier.clone(), producer(watch.clone()))
+            with_start_barrier(barrier.clone(), producer(tx))
         ),
         task(
             "consumer1",
-            with_start_barrier(barrier.clone(), consumer(watch.clone()))
+            with_start_barrier(barrier.clone(), consumer(rx.clone()))
         ),
         task(
             "consumer2",
-            with_start_barrier(barrier.clone(), consumer(watch.clone()))
+            with_start_barrier(barrier.clone(), consumer(rx.clone()))
         )
     );
 }
 
-async fn producer(watch: Arc<Sender<i32>>) {
+async fn producer(watch: Sender<i32>) {
     let watch_id = WatchId::from_sender(&watch);
     for i in 0..10 {
         execution_point("update").await;
+        tracing::info!("sending {i}");
         watch.send(i).unwrap();
         tracing::info!("sent {i}");
         tracing::debug!("sync_event WatchNotified");
         sync_event(WatchNotified(watch_id));
     }
+    drop(watch);
+    sync_event(WatchNotified(watch_id));
 }
 
-async fn consumer(watch: Arc<Sender<i32>>) {
-    let mut watch = watch.subscribe();
+async fn consumer(mut watch: Receiver<i32>) {
     let watch_id = WatchId::from_receiver(&watch);
     loop {
         execution_point("wait for").await;
         let Ok(v) = watch
             .wait_for(|v| {
                 if *v % 2 == 0 {
-                    tracing::debug!("wait for completed");
+                    tracing::debug!("predicate is true, v={}", *v);
                     true
                 } else {
-                    tracing::debug!("sync_event WaitingForWatchUpdate");
+                    tracing::debug!("sync_event WaitingForWatchUpdate, v={}", *v);
                     sync_event(WaitingForWatchUpdate(watch_id));
                     false
                 }
             })
             .await
         else {
+            tracing::info!("received EOF");
             break;
         };
         tracing::info!("received {v}", v = *v);
+        drop(v);
+        execution_point("received update").await;
     }
 }
