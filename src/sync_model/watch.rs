@@ -8,7 +8,7 @@ use crate::{
     },
 };
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct WatchModel {
     tasks: HashMap<TaskId, WatchId>,
     waiters: HashMap<WatchId, HashSet<TaskId>>,
@@ -43,6 +43,7 @@ impl SyncEvent for WatchNotified {
 impl DynSyncModel for WatchModel {
     fn task_progress_dependencies(&self, task_id: TaskId) -> TaskProgressDependencies {
         if self.tasks.contains_key(&task_id) {
+            tracing::debug!("task {task_id:?} is blocked {self:?}");
             TaskProgressDependencies::Blocked
         } else {
             TaskProgressDependencies::Ready {
@@ -59,6 +60,7 @@ impl ProcessSyncEvent<WaitingForWatchUpdate> for WatchModel {
         task_id: TaskId,
         WaitingForWatchUpdate(watch_id): WaitingForWatchUpdate,
     ) -> Result<NotificationOutcome, BadSyncError> {
+        tracing::debug!("WaitingForWatchUpdate task_id={task_id:?} watch_id={watch_id:?} {self:?}");
         self.tasks.insert(task_id, watch_id);
         self.waiters.entry(watch_id).or_default().insert(task_id);
         Ok(NotificationOutcome::ScheduleRequired)
@@ -71,6 +73,7 @@ impl ProcessSyncEvent<WatchNotified> for WatchModel {
         _task_id: TaskId,
         WatchNotified(watch_id): WatchNotified,
     ) -> Result<NotificationOutcome, BadSyncError> {
+        tracing::debug!("WatchNotified watch_id={watch_id:?} {self:?}");
         if let Some(waiters) = self.waiters.remove(&watch_id) {
             for task_id in waiters {
                 self.tasks.remove(&task_id);

@@ -85,6 +85,12 @@ async fn consumer(mut watch: Receiver<i32>) {
                     true
                 } else {
                     tracing::debug!("sync_event WaitingForWatchUpdate, v={}", *v);
+                    // TODO: at EOF, we will observe the last value once more which results in running 2 tasks at the same time:
+                    // 62. finish 1 producer
+                    // 63. resumed [3 consumer2] (run: [], suspended: [2 consumer1 at wait for, 3 consumer2 at wait for], options: [[2 consumer1], [3 consumer2]])
+                    // 64. resumed [2 consumer1] (run: [3 consumer2 at wait for], suspended: [2 consumer1 at wait for], options: [[2 consumer1]])
+                    // 65. finish 3 consumer2
+                    // 66. finish 2 consumer1
                     sync_event(WaitingForWatchUpdate(watch_id));
                     false
                 }
