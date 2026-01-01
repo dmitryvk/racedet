@@ -259,6 +259,68 @@ impl Scheduler {
         }
     }
 
+    pub(crate) async fn on_reached_point_with_pre_event<T: SyncEvent>(
+        &self,
+        task_id: TaskId,
+        name: &str,
+        event: T,
+    ) -> Result<(), BadSyncError> {
+        tracing::debug!("reached point {task_id:?} {name}");
+
+        {
+            let mut guard = self.lock();
+            let inner = &mut *guard;
+            match inner.sync_model.on_notified(task_id, event)? {
+                NotificationOutcome::Acknowledged => {
+                    // do nothing
+                }
+                NotificationOutcome::ScheduleRequired => {
+                    tracing::debug!("scheduler_notify.notify_waiters before");
+                    self.scheduler_notify.notify_waiters();
+                    tracing::debug!("scheduler_notify.notify_waiters done");
+                }
+            }
+
+            let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
+            match &task.state {
+                TaskState::Running => {
+                    inner.trace.push(TraceEvent::TaskSuspended {
+                        task: task_id,
+                        suspend_point: name.to_string(),
+                    });
+                }
+                TaskState::Suspended { .. } | TaskState::Finished => {
+                    panic!(
+"task {} {} reached point {name}, but its state is not Running, but rather is {:?}.
+  This might mean that an internal task concurrency is happening (e.g., join or FuturesUnordered).
+  If this is the case, each spawned task must be wrapped with `task`",
+                    task.id.0, task.name, task.state
+                );
+                }
+            }
+            task.state = TaskState::Suspended {
+                point: name.to_string(),
+            };
+            drop(guard);
+        }
+        self.scheduler_notify.notify_waiters();
+        loop {
+            let mut notified = pin!(self.task_notify.notified());
+            notified.as_mut().enable();
+            {
+                let mut inner = self.lock();
+                let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
+                if matches!(task.state, TaskState::Running) {
+                    tracing::debug!("task {task_id:?} resumed from {name}");
+                    break;
+                }
+            }
+            notified.await;
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn get_trace(&self) -> Trace {
         let inner = self.lock();
         Trace {

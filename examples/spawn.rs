@@ -70,6 +70,7 @@ async fn bar() {
 
 async fn baz(n: u32) {
     execution_point("a1").await;
+    // TODO: non-determinism?
     sync_event(StartingJoin);
     // TODO: spawned tasks receive different task ids depending on interleaving:
     // - start 4 spawn baz 2

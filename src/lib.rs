@@ -49,6 +49,17 @@ pub async fn execution_point(name: &str) {
     }
 }
 
+pub async fn execution_point_with_pre_event<T: SyncEvent>(name: &str, event: T) {
+    if let Some(scheduler) = Scheduler::current()
+        && let Some(task_id) = executor::current_task()
+        && let Err(err) = scheduler
+            .on_reached_point_with_pre_event(task_id, name, event)
+            .await
+    {
+        panic!("invalid sync event: {err}");
+    }
+}
+
 pub fn execution_point_blocking(name: &str) {
     block_on(execution_point(name));
 }
@@ -73,19 +84,8 @@ async fn wait_for_start_barrier(barrier: StartBarrier) {
     use sync_model::start_barrier::{BarrierId, CompletedBarrierWait, WaitingForBarrier};
     if let StartBarrier(Some(barrier)) = barrier {
         tracing::debug!("sync_event barrier waiting");
-        sync_event(WaitingForBarrier(BarrierId::new(&barrier)));
-        // TODO: sometimes scheduler re-schedules the tasks before the execution point is reached:
-        // RUST_LOG=debug CONC_CHECKER_REPLAY="1-1-2,2-1-2/1,2;1-1-3,2-1-3/2;1-1-3,2-1-4/2;1-1-3/1;1-1-4/1#bar,barrier,load,store" cargo run --example simple
-        // 0. start 1 bar
-        // 1. suspend 1 bar barrier
-        // 2. start 2 bar
-        // 3. auto-resumed [1 bar] (run: [2 bar at (spawned)], suspended: [1 bar at barrier])
-        // 4. suspend 2 bar barrier
-        // 5. auto-resumed [2 bar] (run: [1 bar at barrier], suspended: [2 bar at barrier])
-        // 6. suspend 2 bar load
-        // likely caused by races during notifying the scheduler; run scheduler inline/in lockstep?
-
-        execution_point("barrier").await;
+        execution_point_with_pre_event("barrier", WaitingForBarrier(BarrierId::new(&barrier)))
+            .await;
         tracing::debug!("barrier waiting");
         barrier.wait().await;
         tracing::debug!("barrier wait complete");
