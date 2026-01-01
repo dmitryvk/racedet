@@ -1,4 +1,4 @@
-use std::{num::NonZeroU64, sync::Arc, task::Poll};
+use std::{num::NonZeroU64, str::FromStr, sync::Arc, task::Poll};
 
 use futures::executor::block_on;
 use pin_project::pin_project;
@@ -74,6 +74,17 @@ async fn wait_for_start_barrier(barrier: StartBarrier) {
     if let StartBarrier(Some(barrier)) = barrier {
         tracing::debug!("sync_event barrier waiting");
         sync_event(WaitingForBarrier(BarrierId::new(&barrier)));
+        // TODO: sometimes scheduler re-schedules the tasks before the execution point is reached:
+        // RUST_LOG=debug CONC_CHECKER_REPLAY="1-1-2,2-1-2/1,2;1-1-3,2-1-3/2;1-1-3,2-1-4/2;1-1-3/1;1-1-4/1#bar,barrier,load,store" cargo run --example simple
+        // 0. start 1 bar
+        // 1. suspend 1 bar barrier
+        // 2. start 2 bar
+        // 3. auto-resumed [1 bar] (run: [2 bar at (spawned)], suspended: [1 bar at barrier])
+        // 4. suspend 2 bar barrier
+        // 5. auto-resumed [2 bar] (run: [1 bar at barrier], suspended: [2 bar at barrier])
+        // 6. suspend 2 bar load
+        // likely caused by races during notifying the scheduler; run scheduler inline/in lockstep?
+
         execution_point("barrier").await;
         tracing::debug!("barrier waiting");
         barrier.wait().await;
@@ -131,10 +142,15 @@ impl Drop for TaskFinishedGuard {
 #[derive(Clone)]
 pub struct SchedulerHandle(Arc<Scheduler>);
 
-pub fn new_scheduler() -> (SchedulerHandle, impl Future<Output = ()>) {
-    let scheduler = SchedulerHandle(Scheduler::new(scheduler::TaskSelector::Random(
-        RandomTaskSelector::new(),
-    )));
+pub fn new_scheduler(replay: Option<&str>) -> (SchedulerHandle, impl Future<Output = ()> + use<>) {
+    let replay: Option<ReplayTrace> = replay
+        .map(FromStr::from_str)
+        .transpose()
+        .expect("TODO: return error");
+    let scheduler = SchedulerHandle(Scheduler::new(
+        replay,
+        scheduler::TaskSelector::Random(RandomTaskSelector::new()),
+    ));
     let control_fut = scheduler.clone().run_control_loop();
     (scheduler, control_fut)
 }

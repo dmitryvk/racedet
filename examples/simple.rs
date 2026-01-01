@@ -13,7 +13,8 @@ use tokio::join;
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    let (scheduler, control_fut) = new_scheduler();
+    let replay = std::env::var("CONC_CHECKER_REPLAY").ok();
+    let (scheduler, control_fut) = new_scheduler(replay.as_deref());
     tokio::spawn(control_fut);
     let res = timeout(
         Duration::from_secs(10),

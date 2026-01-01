@@ -270,7 +270,7 @@ impl SchedulerRegistry {
                 )
             }
             Entry::Vacant(entry) => {
-                let (scheduler, scheduler_fut) = new_scheduler();
+                let (scheduler, scheduler_fut) = new_scheduler(None);
                 let barrier = scheduler.new_start_barrier(task_count);
                 let cancellation_token = CancellationToken::new();
                 let id = entry.key().clone();
@@ -284,8 +284,9 @@ impl SchedulerRegistry {
                         }
 
                         tracing::info!(
-                            "conchecker scheduler {id} complete. trace:\n{}",
-                            scheduler.get_trace()
+                            "conchecker scheduler {id} complete. trace:\n{}\nreplay:\n{}",
+                            scheduler.get_trace(),
+                            scheduler.get_replay(),
                         );
                     }
                 });

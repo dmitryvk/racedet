@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+};
 
 use itertools::Itertools;
 
@@ -76,6 +79,42 @@ impl ReplayTrace {
         };
         Some(step)
     }
+
+    pub(crate) fn get_resumed_tasks(
+        &self,
+        step_idx: usize,
+        suspended_tasks: &HashSet<(TaskStableId, &str, &str)>,
+    ) -> Option<&[TaskStableId]> {
+        tracing::debug!("strings={:?}", self.strings);
+        let step = self.steps.get(step_idx)?;
+        if step.suspended_tasks.len() != suspended_tasks.len()
+            || !step.suspended_tasks.iter().all(|task| {
+                let name = self.strings.get(task.name).unwrap();
+                let pos = self.strings.get(task.position).unwrap();
+                if suspended_tasks.contains(&(
+                    task.id,
+                    name,
+                    pos,
+                )) {
+                    true
+                } else {
+                    tracing::error!(
+                        "replay diverged: suspended tasks don't match: suspended_tasks doesn't contain {task:?} {:?}",
+                        (task.id, name, pos)
+                    );
+                    false
+                }
+            })
+        {
+            tracing::error!(
+                "replay diverged: suspended tasks don't match: {suspended_tasks:?} {:?}",
+                step.suspended_tasks
+            );
+            return None;
+        }
+
+        Some(&step.resumed_tasks)
+    }
 }
 
 impl std::fmt::Display for ReplayTrace {
@@ -137,10 +176,80 @@ impl StringPool {
         self.map.insert(value.to_owned(), idx);
         idx
     }
+
+    fn get(&self, idx: StringIdx) -> Option<&str> {
+        self.vec.get(idx.0 - 1).map(|s| s.as_str())
+    }
 }
 
 impl std::fmt::Display for StringIdx {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug)]
+pub struct ParseError(&'static str);
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for ParseError {}
+
+impl FromStr for ReplayTrace {
+    type Err = ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (s_steps, s_strings) = s.split_once('#').ok_or(ParseError("no #"))?;
+        tracing::debug!("s_strings={s_strings}");
+
+        let mut strings = StringPool::new();
+        for string in s_strings.split(',') {
+            _ = strings.intern(string);
+        }
+
+        let mut steps = Vec::new();
+        for step in s_steps.split(';') {
+            steps.push(step.parse()?);
+        }
+
+        Ok(Self { strings, steps })
+    }
+}
+
+impl FromStr for ReplayStep {
+    type Err = ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (s_suspended, s_resumed) = s.split_once('/').ok_or(ParseError("no /"))?;
+        let mut suspended = Vec::new();
+        let mut resumed = Vec::new();
+        for task in s_suspended.split(',') {
+            let [s_id, s_name, s_position] = task
+                .split('-')
+                .collect_array()
+                .ok_or(ParseError("wrong number of -"))?;
+            suspended.push(SuspendedTask {
+                id: TaskStableId(s_id.parse().map_err(|_| ParseError("parse task id"))?),
+                name: StringIdx(s_name.parse().map_err(|_| ParseError("parse task name"))?),
+                position: StringIdx(
+                    s_position
+                        .parse()
+                        .map_err(|_| ParseError("parse task position"))?,
+                ),
+            })
+        }
+        for task in s_resumed.split(',') {
+            let task_id = TaskStableId(task.parse().map_err(|_| ParseError("parse task id"))?);
+            resumed.push(task_id);
+        }
+
+        Ok(Self {
+            suspended_tasks: suspended,
+            resumed_tasks: resumed,
+        })
     }
 }

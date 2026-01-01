@@ -12,6 +12,7 @@ use itertools::Itertools;
 use crate::{
     TaskId, TaskStableId, Trace,
     full_trace::{FullTraceTaskId, TaskRef, TraceItem},
+    replay_trace::ReplayTrace,
     scheduler::get_runnable_tasks::{
         NextSchedulerAction, TaskScheduleChoice, get_eligible_scheduler_choices,
     },
@@ -37,6 +38,12 @@ struct Inner {
     tasks: Vec<Task>,
     trace: Vec<TraceEvent>,
     sync_model: SyncModelRegistry,
+    replay: Option<ReplayState>,
+}
+
+struct ReplayState {
+    trace: ReplayTrace,
+    next_step: usize,
 }
 
 pub(crate) struct Task {
@@ -96,7 +103,11 @@ impl RandomTaskSelector {
 }
 
 impl Scheduler {
-    pub(crate) fn new(task_selector: TaskSelector) -> Arc<Self> {
+    pub(crate) fn new(replay: Option<ReplayTrace>, task_selector: TaskSelector) -> Arc<Self> {
+        tracing::debug!(
+            "replaying {}",
+            replay.as_ref().map(ToString::to_string).unwrap_or_default()
+        );
         Arc::new(Scheduler {
             inner: Mutex::new(Inner {
                 next_task_id: 1,
@@ -105,6 +116,10 @@ impl Scheduler {
                 tasks: Vec::new(),
                 trace: Vec::new(),
                 sync_model: SyncModelRegistry::new(),
+                replay: replay.map(|trace| ReplayState {
+                    trace,
+                    next_step: 0,
+                }),
             }),
             scheduler_notify: tokio::sync::Notify::new(),
             task_notify: tokio::sync::Notify::new(),
@@ -423,7 +438,45 @@ impl Scheduler {
                 tracing::debug!("no ready tasks!");
             }
             NextSchedulerAction::Choices(choices) => {
-                let task_choice = inner.task_selector.choose_next_running_task(&choices);
+                let task_choice = if let Some(replay) = &mut inner.replay
+                    && let suspended_tasks = inner
+                        .tasks
+                        .iter()
+                        .filter_map(|task| match &task.state {
+                            TaskState::Suspended { point } => Some((
+                                task.stable_id.expect("suspended tasks have stable id"),
+                                task.name.as_str(),
+                                point.as_str(),
+                            )),
+                            _ => None,
+                        })
+                        .collect::<HashSet<_>>()
+                    && let Some(resumed_tasks) = replay
+                        .trace
+                        .get_resumed_tasks(replay.next_step, &suspended_tasks)
+                    && let Some(task_choice) = choices.iter().find(|choice| {
+                        choice.to_run.len() == resumed_tasks.len()
+                            && choice
+                                .to_run
+                                .iter()
+                                .map(|id| {
+                                    inner.tasks[Self::task_idx(*id)]
+                                        .stable_id
+                                        .expect("suspended task has stable id")
+                                })
+                                .collect::<HashSet<_>>()
+                                == HashSet::from_iter(resumed_tasks.iter().copied())
+                    }) {
+                    tracing::debug!("replayed step {}", replay.next_step);
+                    replay.next_step += 1;
+                    task_choice
+                } else {
+                    if inner.replay.is_some() {
+                        tracing::error!("task execution has diverged");
+                        inner.replay = None;
+                    }
+                    inner.task_selector.choose_next_running_task(&choices)
+                };
 
                 tracing::debug!(
                     "chose {task_choice:?} out of {} options: {choices:?}",
