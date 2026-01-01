@@ -26,6 +26,7 @@ async fn main() {
 
     // use the following script to execute the example:
     // curl http://localhost:3000/reset -X POST && curl http://localhost:3000/increment -H 'x-concchecker: 2-foo-r1' & curl http://localhost:3000/increment -H 'x-concchecker: 2-foo-r2' & wait; curl http://localhost:3000/retrieve_concchecker_trace/foo -X POST
+    // add -H 'x-conchecker-replay: <...>'
 
     let scheduler_registry = SchedulerRegistry::new();
     // build our application with a route
@@ -70,7 +71,11 @@ async fn retrieve_concchecker_trace(
         state.scheduler_registry.take_scheduler(&scheduler_id)
     {
         cancellation_token.cancel();
-        Ok(format!("{}", scheduler.get_trace()))
+        Ok(format!(
+            "{}\n{}",
+            scheduler.get_trace(),
+            scheduler.get_replay()
+        ))
     } else {
         Err((
             StatusCode::NOT_FOUND,
@@ -190,9 +195,15 @@ where
             .and_then(|h| h.to_str().ok())
             .and_then(|h| RequestConccheckerHeader::from_str(h).ok())
         {
-            let (scheduler, barrier, _) = self
-                .schedulers
-                .get_or_insert(header.scheduler_id, header.concurrent_task_count);
+            let replay = req
+                .headers()
+                .get("x-concchecker-replay")
+                .and_then(|h| h.to_str().ok());
+            let (scheduler, barrier, _) = self.schedulers.get_or_insert(
+                header.scheduler_id,
+                header.concurrent_task_count,
+                replay,
+            );
             conc_checker::with_scheduler(
                 scheduler,
                 task(
@@ -257,6 +268,7 @@ impl SchedulerRegistry {
         self: &Arc<Self>,
         id: String,
         task_count: usize,
+        replay: Option<&str>,
     ) -> (SchedulerHandle, StartBarrier, CancellationToken) {
         use std::collections::hash_map::Entry;
         let mut schedulers = self.schedulers.lock().unwrap();
@@ -270,7 +282,7 @@ impl SchedulerRegistry {
                 )
             }
             Entry::Vacant(entry) => {
-                let (scheduler, scheduler_fut) = new_scheduler(None);
+                let (scheduler, scheduler_fut) = new_scheduler(replay);
                 let barrier = scheduler.new_start_barrier(task_count);
                 let cancellation_token = CancellationToken::new();
                 let id = entry.key().clone();
