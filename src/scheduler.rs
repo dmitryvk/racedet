@@ -12,7 +12,9 @@ use itertools::Itertools;
 use crate::{
     TaskId, TaskStableId, Trace,
     full_trace::{FullTraceTaskId, TaskRef, TraceItem},
-    scheduler::get_runnable_tasks::{TaskScheduleChoice, get_eligible_scheduler_choices},
+    scheduler::get_runnable_tasks::{
+        NextSchedulerAction, TaskScheduleChoice, get_eligible_scheduler_choices,
+    },
     sync_model::{BadSyncError, NotificationOutcome, SyncEvent, SyncInitEvent, SyncModelRegistry},
 };
 
@@ -48,7 +50,7 @@ pub(crate) struct Task {
 #[derive(Debug)]
 enum TaskState {
     // The task is ready to be executed (at suspension point)
-    Ready { point: String },
+    Suspended { point: String },
     // The task is currently running.
     // There can be more than one running task in case a task becomes blocked while it was running
     Running,
@@ -212,7 +214,7 @@ impl Scheduler {
                         suspend_point: name.to_string(),
                     });
                 }
-                TaskState::Ready { .. } | TaskState::Finished => {
+                TaskState::Suspended { .. } | TaskState::Finished => {
                     panic!(
 "task {} {} reached point {name}, but its state is not Running, but rather is {:?}.
   This might mean that an internal task concurrency is happening (e.g., join or FuturesUnordered).
@@ -221,7 +223,7 @@ impl Scheduler {
                 );
                 }
             }
-            task.state = TaskState::Ready {
+            task.state = TaskState::Suspended {
                 point: name.to_string(),
             };
             drop(guard);
@@ -362,10 +364,7 @@ impl Scheduler {
                     let mut new_tasks = inner
                         .tasks
                         .iter_mut()
-                        .filter(|task| match &task.state {
-                            TaskState::Ready { .. } if task.stable_id.is_none() => true,
-                            _ => false,
-                        })
+                        .filter(|task| matches!(&task.state, TaskState::Suspended { .. } if task.stable_id.is_none()))
                         .peekable();
                     if new_tasks.peek().is_some() {
                         let mut new_tasks: Vec<&mut Task> = new_tasks.collect();
@@ -389,7 +388,7 @@ impl Scheduler {
                             TaskState::Running => {
                                 running_tasks.insert(task.id);
                             }
-                            TaskState::Ready { .. } => {
+                            TaskState::Suspended { .. } => {
                                 suspended_tasks.insert(task.id);
                             }
                             TaskState::Finished => {
@@ -404,111 +403,91 @@ impl Scheduler {
                         &inner.sync_model,
                     )
                 };
-                if !task_choices.is_empty() {
-                    let task_choice = inner.task_selector.choose_next_running_task(&task_choices);
-                    tracing::debug!(
-                        "chose {task_choice:?} out of {} options: {task_choices:?}",
-                        task_choices.len()
-                    );
-                    if !task_choice.to_run.is_empty() {
-                        if task_choice.chosen_task.is_some() {
-                            inner.trace.push(TraceEvent::ScheduleDecision {
-                                resumed_tasks: task_choice.to_run.iter().copied().collect(),
-                                running_tasks: inner
-                                    .tasks
-                                    .iter()
-                                    .filter(|task| matches!(task.state, TaskState::Running))
-                                    .map(|task| TraceTaskSnapshot {
-                                        task_id: task.id,
-                                        point: match &task.state {
-                                            TaskState::Ready { point } => Some(point.clone()),
-                                            TaskState::Running | TaskState::Finished => {
-                                                task.prev_suspend_point.clone()
-                                            }
-                                        },
-                                    })
-                                    .collect(),
-                                suspended_tasks: inner
-                                    .tasks
-                                    .iter()
-                                    .filter(|task| matches!(task.state, TaskState::Ready { .. }))
-                                    .map(|task| TraceTaskSnapshot {
-                                        task_id: task.id,
-                                        point: match &task.state {
-                                            TaskState::Ready { point } => Some(point.clone()),
-                                            TaskState::Running | TaskState::Finished => {
-                                                task.prev_suspend_point.clone()
-                                            }
-                                        },
-                                    })
-                                    .collect(),
-                                options: task_choices
-                                    .iter()
-                                    .map(|choice| choice.to_run.iter().copied().collect())
-                                    .collect(),
-                            });
+                match task_choices {
+                    NextSchedulerAction::NoChoice(tasks) => {
+                        if tasks.is_empty() {
+                            tracing::debug!("no ready tasks!");
                         } else {
+                            let (running_tasks, suspended_tasks) =
+                                Self::trace_task_snapshots(inner);
                             inner.trace.push(TraceEvent::AutoResumedTasks {
-                                resumed_tasks: task_choice.to_run.iter().copied().collect(),
-                                running_tasks: inner
-                                    .tasks
-                                    .iter()
-                                    .filter(|task| matches!(task.state, TaskState::Running))
-                                    .map(|task| TraceTaskSnapshot {
-                                        task_id: task.id,
-                                        point: match &task.state {
-                                            TaskState::Ready { point } => Some(point.clone()),
-                                            TaskState::Running | TaskState::Finished => {
-                                                task.prev_suspend_point.clone()
-                                            }
-                                        },
-                                    })
-                                    .collect(),
-                                suspended_tasks: inner
-                                    .tasks
-                                    .iter()
-                                    .filter(|task| matches!(task.state, TaskState::Ready { .. }))
-                                    .map(|task| TraceTaskSnapshot {
-                                        task_id: task.id,
-                                        point: match &task.state {
-                                            TaskState::Ready { point } => Some(point.clone()),
-                                            TaskState::Running | TaskState::Finished => {
-                                                task.prev_suspend_point.clone()
-                                            }
-                                        },
-                                    })
-                                    .collect(),
+                                resumed_tasks: tasks.iter().copied().collect(),
+                                running_tasks,
+                                suspended_tasks,
                             });
+                            self.resume_tasks(inner, &tasks);
                         }
-                        for task_id in &task_choice.to_run {
-                            let task = inner.tasks.iter_mut().find(|t| t.id == *task_id).unwrap();
-                            task.prev_suspend_point = match mem::replace(
-                                &mut task.state,
-                                TaskState::Running,
-                            ) {
-                                TaskState::Ready { point } => Some(point),
-                                TaskState::Running | TaskState::Finished => {
-                                    panic!(
-                                        "task {} {} is selected to run, but its state was not Ready, but rather is {:?}. This is an internal error in conc-checker.",
-                                        task.id.0, task.name, task.state
-                                    );
-                                }
-                            };
-                            tracing::debug!("resuming task {:?}", task.id);
-                        }
-                        self.task_notify.notify_waiters();
-                    } else {
+                    }
+                    NextSchedulerAction::Choices(choices) if choices.is_empty() => {
                         tracing::debug!("no ready tasks!");
                     }
-                } else {
-                    tracing::debug!("run loop control: no tasks to resume");
-                }
+                    NextSchedulerAction::Choices(choices) => {
+                        let task_choice = inner.task_selector.choose_next_running_task(&choices);
+
+                        tracing::debug!(
+                            "chose {task_choice:?} out of {} options: {choices:?}",
+                            choices.len()
+                        );
+                        let (running_tasks, suspended_tasks) = Self::trace_task_snapshots(inner);
+                        inner.trace.push(TraceEvent::ScheduleDecision {
+                            resumed_tasks: task_choice.to_run.iter().copied().collect(),
+                            running_tasks,
+                            suspended_tasks,
+                            options: choices
+                                .iter()
+                                .map(|choice| choice.to_run.iter().copied().collect())
+                                .collect(),
+                        });
+
+                        self.resume_tasks(inner, &task_choice.to_run);
+                    }
+                };
 
                 drop(guard);
             }
 
             notified.await;
         }
+    }
+
+    fn resume_tasks(&self, inner: &mut Inner, tasks: &HashSet<TaskId>) {
+        if !tasks.is_empty() {
+            for task_id in tasks {
+                let task = inner.tasks.get_mut(Self::task_idx(*task_id)).unwrap();
+                task.prev_suspend_point = match mem::replace(&mut task.state, TaskState::Running) {
+                    TaskState::Suspended { point } => Some(point),
+                    TaskState::Running | TaskState::Finished => {
+                        panic!(
+                            "Internal error: task {} {} is selected to run, but its state was not Suspended, but rather is {:?}.",
+                            task.id.0, task.name, task.state
+                        );
+                    }
+                };
+                tracing::debug!("resuming task {:?}", task.id);
+            }
+
+            self.task_notify.notify_waiters();
+        }
+    }
+
+    fn trace_task_snapshots(inner: &Inner) -> (Vec<TraceTaskSnapshot>, Vec<TraceTaskSnapshot>) {
+        let mut running_tasks = Vec::new();
+        let mut suspended_tasks = Vec::new();
+        for task in &inner.tasks {
+            let snapshot = TraceTaskSnapshot {
+                task_id: task.id,
+                point: match &task.state {
+                    TaskState::Suspended { point } => Some(point.clone()),
+                    TaskState::Running | TaskState::Finished => task.prev_suspend_point.clone(),
+                },
+            };
+            match &task.state {
+                TaskState::Suspended { .. } => suspended_tasks.push(snapshot),
+                TaskState::Running => running_tasks.push(snapshot),
+                TaskState::Finished => {}
+            }
+        }
+        (running_tasks, suspended_tasks)
     }
 }
 

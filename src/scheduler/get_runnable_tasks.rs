@@ -7,15 +7,21 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskScheduleChoice {
-    pub(crate) chosen_task: Option<TaskId>,
+    pub(crate) chosen_task: TaskId,
     pub(crate) to_run: HashSet<TaskId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum NextSchedulerAction {
+    NoChoice(HashSet<TaskId>),
+    Choices(Vec<TaskScheduleChoice>),
 }
 
 pub(crate) fn get_eligible_scheduler_choices(
     running_tasks: &HashSet<TaskId>,
     suspended_tasks: &HashSet<TaskId>,
     sync: &SyncModelRegistry,
-) -> Vec<TaskScheduleChoice> {
+) -> NextSchedulerAction {
     let mut has_ready = false;
     let mut need_to_run = HashSet::new();
     for task_id in running_tasks {
@@ -35,14 +41,11 @@ pub(crate) fn get_eligible_scheduler_choices(
     }
 
     if has_ready {
-        return vec![TaskScheduleChoice {
-            chosen_task: None,
-            to_run: need_to_run,
-        }];
+        return NextSchedulerAction::NoChoice(need_to_run);
     }
 
     let mut seen_task_sets = HashSet::<BTreeSet<TaskId>>::new();
-    let mut result = Vec::new();
+    let mut choices = Vec::new();
     for &task_id in suspended_tasks {
         match task_transitive_deps(sync, task_id) {
             TaskProgressDependencies::Ready { need_to_run } => {
@@ -51,8 +54,8 @@ pub(crate) fn get_eligible_scheduler_choices(
                     .filter(|task_id| !running_tasks.contains(task_id))
                     .collect();
                 if seen_task_sets.insert(deps.iter().copied().collect()) {
-                    result.push(TaskScheduleChoice {
-                        chosen_task: Some(task_id),
+                    choices.push(TaskScheduleChoice {
+                        chosen_task: task_id,
                         to_run: deps,
                     });
                 }
@@ -61,7 +64,7 @@ pub(crate) fn get_eligible_scheduler_choices(
         }
     }
 
-    result
+    NextSchedulerAction::Choices(choices)
 }
 
 fn task_transitive_deps(sync: &SyncModelRegistry, task_id: TaskId) -> TaskProgressDependencies {
@@ -114,13 +117,7 @@ mod tests {
             &[task_ids[1]].into_iter().collect(),
             &sync_registry,
         );
-        assert_eq!(
-            choices,
-            vec![TaskScheduleChoice {
-                chosen_task: None,
-                to_run: HashSet::new()
-            }]
-        );
+        assert_eq!(choices, NextSchedulerAction::NoChoice(HashSet::new()));
     }
 
     #[test]
@@ -149,10 +146,7 @@ mod tests {
         );
         assert_eq!(
             choices,
-            vec![TaskScheduleChoice {
-                chosen_task: None,
-                to_run: [task_ids[1], task_ids[2]].into_iter().collect()
-            }]
+            NextSchedulerAction::NoChoice([task_ids[1], task_ids[2]].into_iter().collect())
         );
     }
 
@@ -173,13 +167,17 @@ mod tests {
         sync_registry
             .on_notified(task_ids[1], ProvideDeps(TaskProgressDependencies::Blocked))
             .unwrap();
-        let mut choices = get_eligible_scheduler_choices(
+        let choices = get_eligible_scheduler_choices(
             &[].into_iter().collect(),
             &[task_ids[0], task_ids[1], task_ids[2], task_ids[3]]
                 .into_iter()
                 .collect(),
             &sync_registry,
         );
+
+        let NextSchedulerAction::Choices(mut choices) = choices else {
+            panic!("unexpected action: {choices:?}");
+        };
 
         choices.sort_by_cached_key(|item| {
             (
@@ -192,7 +190,7 @@ mod tests {
         assert_eq!(
             choices[0],
             TaskScheduleChoice {
-                chosen_task: Some(task_ids[0]),
+                chosen_task: task_ids[0],
                 to_run: [task_ids[0], task_ids[1], task_ids[2]]
                     .into_iter()
                     .collect()
@@ -201,14 +199,14 @@ mod tests {
         assert_eq!(
             choices[1],
             TaskScheduleChoice {
-                chosen_task: Some(task_ids[2]),
+                chosen_task: task_ids[2],
                 to_run: [task_ids[2]].into_iter().collect()
             }
         );
         assert_eq!(
             choices[2],
             TaskScheduleChoice {
-                chosen_task: Some(task_ids[3]),
+                chosen_task: task_ids[3],
                 to_run: [task_ids[3]].into_iter().collect()
             }
         );
@@ -279,11 +277,14 @@ mod tests {
             )
             .unwrap();
 
-        let mut choices = get_eligible_scheduler_choices(
+        let choices = get_eligible_scheduler_choices(
             &HashSet::new(),
             &task_ids.iter().copied().collect(),
             &sync_registry,
         );
+        let NextSchedulerAction::Choices(mut choices) = choices else {
+            panic!("unexpected action: {choices:?}");
+        };
 
         choices.sort_by_cached_key(|item| {
             (
@@ -297,18 +298,18 @@ mod tests {
         assert_eq!(
             choices[0],
             TaskScheduleChoice {
-                chosen_task: Some(task_ids[0]),
+                chosen_task: task_ids[0],
                 to_run: [task_ids[0]].into_iter().collect()
             }
         );
         assert_eq!(
             choices[1],
             TaskScheduleChoice {
-                chosen_task: Some(task_ids[1]),
+                chosen_task: task_ids[1],
                 to_run: [task_ids[1], task_ids[2]].into_iter().collect()
             }
         );
-        assert!([task_ids[4], task_ids[5], task_ids[6]].contains(&choices[2].chosen_task.unwrap()));
+        assert!([task_ids[4], task_ids[5], task_ids[6]].contains(&choices[2].chosen_task));
         assert_eq!(
             choices[2].to_run,
             [task_ids[4], task_ids[5], task_ids[6]]
