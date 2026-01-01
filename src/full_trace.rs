@@ -45,6 +45,15 @@ pub enum FullTraceTaskId {
     Unstable(TaskId),
 }
 
+impl FullTraceTaskId {
+    pub(crate) fn stable_id(&self) -> Option<TaskStableId> {
+        match self {
+            FullTraceTaskId::Stable(id) => Some(*id),
+            FullTraceTaskId::Unstable(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TaskRef {
     pub id: FullTraceTaskId,

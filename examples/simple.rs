@@ -21,22 +21,24 @@ async fn main() {
         with_scheduler(scheduler.clone(), capture_panic(foo())),
     )
     .await;
-    let trace = scheduler.get_trace();
-    println!("{trace}");
     match res {
         Ok(Ok(res)) => {
             println!("ok {res:?}");
         }
         Ok(Err(panic)) => {
             println!(
-                "panic {} at {}\n{}",
-                panic.message, panic.location, panic.backtrace
+                "panic at {location}:\n{message}\n{backtrace}",
+                message = panic.message,
+                location = panic.location,
+                backtrace = panic.backtrace,
             );
         }
         Err(timeout) => {
             println!("timeout {}", timeout.active_traces[0].stack_trace());
         }
     }
+    println!("{}", scheduler.get_trace());
+    println!("{}", scheduler.get_replay());
 }
 
 async fn foo() {

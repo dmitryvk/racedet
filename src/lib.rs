@@ -7,12 +7,14 @@ use tokio::sync::Barrier;
 use crate::{
     executor::{CurrentTaskIdGuard, TaskFuture},
     full_trace::Trace,
+    replay_trace::ReplayTrace,
     scheduler::{RandomTaskSelector, Scheduler},
     sync_model::{SyncEvent, SyncInitEvent},
 };
 pub mod capture_panics;
 mod executor;
 pub mod full_trace;
+mod replay_trace;
 mod scheduler;
 pub mod sync_model;
 
@@ -148,6 +150,10 @@ impl SchedulerHandle {
 
     pub fn get_trace(&self) -> Trace {
         self.0.get_trace()
+    }
+
+    pub fn get_replay(&self) -> ReplayTrace {
+        ReplayTrace::from_trace(&self.0.get_trace())
     }
 
     pub fn new_start_barrier(&self, task_count: usize) -> StartBarrier {
