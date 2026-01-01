@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use itertools::Itertools;
 
-use crate::TaskId;
+use crate::{TaskId, TaskStableId};
 
 #[derive(Debug, Clone)]
 pub struct Trace {
@@ -40,14 +40,20 @@ pub enum TraceItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum FullTraceTaskId {
+    Stable(TaskStableId),
+    Unstable(TaskId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TaskRef {
-    pub id: TaskId,
+    pub id: FullTraceTaskId,
     pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TaskSnapshot {
-    pub id: TaskId,
+    pub id: FullTraceTaskId,
     pub name: String,
     pub position: Option<String>,
 }
@@ -95,9 +101,18 @@ impl std::fmt::Display for TraceItem {
     }
 }
 
+impl std::fmt::Display for FullTraceTaskId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FullTraceTaskId::Stable(task_stable_id) => write!(f, "{task_stable_id}"),
+            FullTraceTaskId::Unstable(task_id) => write!(f, "#{task_id}"),
+        }
+    }
+}
+
 impl std::fmt::Display for TaskRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} {}", self.id, self.name)
+        write!(f, "{id} {name}", id = self.id, name = self.name)
     }
 }
 
@@ -105,10 +120,10 @@ impl std::fmt::Display for TaskSnapshot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{} {} at {}",
-            self.id,
-            self.name,
-            self.position.as_deref().unwrap_or("(spawned)")
+            "{id} {name} at {position}",
+            id = self.id,
+            name = self.name,
+            position = self.position.as_deref().unwrap_or("(spawned)")
         )
     }
 }

@@ -10,8 +10,8 @@ use std::{
 use itertools::Itertools;
 
 use crate::{
-    TaskId, Trace,
-    full_trace::{TaskRef, TraceItem},
+    TaskId, TaskStableId, Trace,
+    full_trace::{FullTraceTaskId, TaskRef, TraceItem},
     scheduler::get_runnable_tasks::{TaskScheduleChoice, get_eligible_scheduler_choices},
     sync_model::{BadSyncError, NotificationOutcome, SyncEvent, SyncInitEvent, SyncModelRegistry},
 };
@@ -30,6 +30,7 @@ pub(crate) struct Scheduler {
 
 struct Inner {
     next_task_id: u64,
+    next_stable_task_id: u64,
     task_selector: TaskSelector,
     tasks: Vec<Task>,
     trace: Vec<TraceEvent>,
@@ -38,6 +39,7 @@ struct Inner {
 
 pub(crate) struct Task {
     id: TaskId,
+    stable_id: Option<TaskStableId>,
     name: String,
     prev_suspend_point: Option<String>,
     state: TaskState,
@@ -96,6 +98,7 @@ impl Scheduler {
         Arc::new(Scheduler {
             inner: Mutex::new(Inner {
                 next_task_id: 1,
+                next_stable_task_id: 1,
                 task_selector,
                 tasks: Vec::new(),
                 trace: Vec::new(),
@@ -134,6 +137,7 @@ impl Scheduler {
         inner.next_task_id += 1;
         inner.tasks.push(Task {
             id,
+            stable_id: None,
             name,
             prev_suspend_point: None,
             state: TaskState::Running,
@@ -310,9 +314,12 @@ impl Scheduler {
     }
 
     fn make_task_ref(inner: &Inner, task_id: TaskId) -> TaskRef {
+        let task = &inner.tasks[Self::task_idx(task_id)];
         TaskRef {
-            id: task_id,
-            name: inner.tasks[Self::task_idx(task_id)].name.clone(),
+            id: task
+                .stable_id
+                .map_or(FullTraceTaskId::Unstable(task.id), FullTraceTaskId::Stable),
+            name: task.name.clone(),
         }
     }
 
@@ -322,7 +329,9 @@ impl Scheduler {
     ) -> crate::full_trace::TaskSnapshot {
         let task = &inner.tasks[Self::task_idx(task_snapshot.task_id)];
         crate::full_trace::TaskSnapshot {
-            id: task_snapshot.task_id,
+            id: task
+                .stable_id
+                .map_or(FullTraceTaskId::Unstable(task.id), FullTraceTaskId::Stable),
             name: task.name.clone(),
             position: task_snapshot.point.clone(),
         }
@@ -349,6 +358,29 @@ impl Scheduler {
                         ))
                         .join(", ")
                 );
+                {
+                    let mut new_tasks = inner
+                        .tasks
+                        .iter_mut()
+                        .filter(|task| match &task.state {
+                            TaskState::Ready { .. } if task.stable_id.is_none() => true,
+                            _ => false,
+                        })
+                        .peekable();
+                    if new_tasks.peek().is_some() {
+                        let mut new_tasks: Vec<&mut Task> = new_tasks.collect();
+                        new_tasks.sort_by(|task_1, task_2| {
+                            (&task_1.name, task_1.id).cmp(&(&task_2.name, task_2.id))
+                        });
+                        for new_task in new_tasks {
+                            let stable_id =
+                                TaskStableId(NonZeroU64::new(inner.next_stable_task_id).unwrap());
+                            inner.next_stable_task_id += 1;
+                            new_task.stable_id = Some(stable_id);
+                        }
+                    }
+                }
+
                 let task_choices = {
                     let mut running_tasks = HashSet::new();
                     let mut suspended_tasks = HashSet::new();

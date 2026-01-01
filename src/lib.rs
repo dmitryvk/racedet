@@ -19,6 +19,9 @@ pub mod sync_model;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TaskId(NonZeroU64);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TaskStableId(NonZeroU64);
+
 pub fn sync_event<T: SyncEvent>(event: T) {
     if let Some(scheduler) = Scheduler::current()
         && let Some(task_id) = executor::current_task()
@@ -246,6 +249,12 @@ impl<Fut: Future> Future for WithScheduler<Fut> {
 }
 
 impl std::fmt::Display for TaskId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::fmt::Display for TaskStableId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
     }
