@@ -471,8 +471,8 @@ impl Scheduler {
                     replay.next_step += 1;
                     task_choice
                 } else {
-                    if inner.replay.is_some() {
-                        tracing::error!("task execution has diverged");
+                    if let Some(replay) = &inner.replay {
+                        tracing::error!("task execution has diverged at step {}", replay.next_step);
                         inner.replay = None;
                     }
                     inner.task_selector.choose_next_running_task(&choices)

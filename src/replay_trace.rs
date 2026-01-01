@@ -87,6 +87,7 @@ impl ReplayTrace {
     ) -> Option<&[TaskStableId]> {
         tracing::debug!("strings={:?}", self.strings);
         let step = self.steps.get(step_idx)?;
+        tracing::debug!("step={step:?}");
         if step.suspended_tasks.len() != suspended_tasks.len()
             || !step.suspended_tasks.iter().all(|task| {
                 let name = self.strings.get(task.name).unwrap();
@@ -99,7 +100,7 @@ impl ReplayTrace {
                     true
                 } else {
                     tracing::error!(
-                        "replay diverged: suspended tasks don't match: suspended_tasks doesn't contain {task:?} {:?}",
+                        "replay diverged: suspended tasks don't match: suspended_tasks={suspended_tasks:?} doesn't contain {:?}",
                         (task.id, name, pos)
                     );
                     false
@@ -107,8 +108,7 @@ impl ReplayTrace {
             })
         {
             tracing::error!(
-                "replay diverged: suspended tasks don't match: {suspended_tasks:?} {:?}",
-                step.suspended_tasks
+                "replay diverged: suspended tasks don't match: {suspended_tasks:?} != {:?}", step.suspended_tasks
             );
             return None;
         }
