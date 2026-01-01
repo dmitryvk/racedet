@@ -345,109 +345,106 @@ impl Scheduler {
             let mut notified = pin!(self.scheduler_notify.notified());
             notified.as_mut().enable();
 
-            {
-                let mut guard = self.lock();
-                let inner = &mut *guard;
-                tracing::debug!(
-                    "run control loop; tasks=[{}]",
-                    inner
-                        .tasks
-                        .iter()
-                        .take(10)
-                        .map(|t| format!(
-                            "{{ id={:?} name={} prev={:?} state={:?} }}",
-                            t.id, t.name, t.prev_suspend_point, t.state
-                        ))
-                        .join(", ")
-                );
-                {
-                    let mut new_tasks = inner
+            self.control_loop_iteration();
+
+            notified.await;
+        }
+    }
+
+    fn control_loop_iteration(&self) {
+        let mut guard = self.lock();
+        let inner = &mut *guard;
+        tracing::debug!(
+            "run control loop; tasks=[{}]",
+            inner
+                .tasks
+                .iter()
+                .take(10)
+                .map(|t| format!(
+                    "{{ id={:?} name={} prev={:?} state={:?} }}",
+                    t.id, t.name, t.prev_suspend_point, t.state
+                ))
+                .join(", ")
+        );
+        {
+            let mut new_tasks = inner
                         .tasks
                         .iter_mut()
                         .filter(|task| matches!(&task.state, TaskState::Suspended { .. } if task.stable_id.is_none()))
                         .peekable();
-                    if new_tasks.peek().is_some() {
-                        let mut new_tasks: Vec<&mut Task> = new_tasks.collect();
-                        new_tasks.sort_by(|task_1, task_2| {
-                            (&task_1.name, task_1.id).cmp(&(&task_2.name, task_2.id))
-                        });
-                        for new_task in new_tasks {
-                            let stable_id =
-                                TaskStableId(NonZeroU64::new(inner.next_stable_task_id).unwrap());
-                            inner.next_stable_task_id += 1;
-                            new_task.stable_id = Some(stable_id);
-                        }
+            if new_tasks.peek().is_some() {
+                let mut new_tasks: Vec<&mut Task> = new_tasks.collect();
+                new_tasks.sort_by(|task_1, task_2| {
+                    (&task_1.name, task_1.id).cmp(&(&task_2.name, task_2.id))
+                });
+                for new_task in new_tasks {
+                    let stable_id =
+                        TaskStableId(NonZeroU64::new(inner.next_stable_task_id).unwrap());
+                    inner.next_stable_task_id += 1;
+                    new_task.stable_id = Some(stable_id);
+                }
+            }
+        }
+
+        let task_choices = {
+            let mut running_tasks = HashSet::new();
+            let mut suspended_tasks = HashSet::new();
+            for task in &inner.tasks {
+                match &task.state {
+                    TaskState::Running => {
+                        running_tasks.insert(task.id);
+                    }
+                    TaskState::Suspended { .. } => {
+                        suspended_tasks.insert(task.id);
+                    }
+                    TaskState::Finished => {
+                        // TODO: this state are unnecessary
                     }
                 }
-
-                let task_choices = {
-                    let mut running_tasks = HashSet::new();
-                    let mut suspended_tasks = HashSet::new();
-                    for task in &inner.tasks {
-                        match &task.state {
-                            TaskState::Running => {
-                                running_tasks.insert(task.id);
-                            }
-                            TaskState::Suspended { .. } => {
-                                suspended_tasks.insert(task.id);
-                            }
-                            TaskState::Finished => {
-                                // TODO: this state are unnecessary
-                            }
-                        }
-                    }
-
-                    get_eligible_scheduler_choices(
-                        &running_tasks,
-                        &suspended_tasks,
-                        &inner.sync_model,
-                    )
-                };
-                match task_choices {
-                    NextSchedulerAction::NoChoice(tasks) => {
-                        if tasks.is_empty() {
-                            tracing::debug!("no ready tasks!");
-                        } else {
-                            let (running_tasks, suspended_tasks) =
-                                Self::trace_task_snapshots(inner);
-                            inner.trace.push(TraceEvent::AutoResumedTasks {
-                                resumed_tasks: tasks.iter().copied().collect(),
-                                running_tasks,
-                                suspended_tasks,
-                            });
-                            self.resume_tasks(inner, &tasks);
-                        }
-                    }
-                    NextSchedulerAction::Choices(choices) if choices.is_empty() => {
-                        tracing::debug!("no ready tasks!");
-                    }
-                    NextSchedulerAction::Choices(choices) => {
-                        let task_choice = inner.task_selector.choose_next_running_task(&choices);
-
-                        tracing::debug!(
-                            "chose {task_choice:?} out of {} options: {choices:?}",
-                            choices.len()
-                        );
-                        let (running_tasks, suspended_tasks) = Self::trace_task_snapshots(inner);
-                        inner.trace.push(TraceEvent::ScheduleDecision {
-                            resumed_tasks: task_choice.to_run.iter().copied().collect(),
-                            running_tasks,
-                            suspended_tasks,
-                            options: choices
-                                .iter()
-                                .map(|choice| choice.to_run.iter().copied().collect())
-                                .collect(),
-                        });
-
-                        self.resume_tasks(inner, &task_choice.to_run);
-                    }
-                };
-
-                drop(guard);
             }
 
-            notified.await;
-        }
+            get_eligible_scheduler_choices(&running_tasks, &suspended_tasks, &inner.sync_model)
+        };
+        match task_choices {
+            NextSchedulerAction::NoChoice(tasks) => {
+                if tasks.is_empty() {
+                    tracing::debug!("no ready tasks!");
+                } else {
+                    let (running_tasks, suspended_tasks) = Self::trace_task_snapshots(inner);
+                    inner.trace.push(TraceEvent::AutoResumedTasks {
+                        resumed_tasks: tasks.iter().copied().collect(),
+                        running_tasks,
+                        suspended_tasks,
+                    });
+                    self.resume_tasks(inner, &tasks);
+                }
+            }
+            NextSchedulerAction::Choices(choices) if choices.is_empty() => {
+                tracing::debug!("no ready tasks!");
+            }
+            NextSchedulerAction::Choices(choices) => {
+                let task_choice = inner.task_selector.choose_next_running_task(&choices);
+
+                tracing::debug!(
+                    "chose {task_choice:?} out of {} options: {choices:?}",
+                    choices.len()
+                );
+                let (running_tasks, suspended_tasks) = Self::trace_task_snapshots(inner);
+                inner.trace.push(TraceEvent::ScheduleDecision {
+                    resumed_tasks: task_choice.to_run.iter().copied().collect(),
+                    running_tasks,
+                    suspended_tasks,
+                    options: choices
+                        .iter()
+                        .map(|choice| choice.to_run.iter().copied().collect())
+                        .collect(),
+                });
+
+                self.resume_tasks(inner, &task_choice.to_run);
+            }
+        };
+
+        drop(guard);
     }
 
     fn resume_tasks(&self, inner: &mut Inner, tasks: &HashSet<TaskId>) {
