@@ -6,15 +6,15 @@ use tokio::sync::Barrier;
 
 use crate::{
     executor::{CurrentTaskIdGuard, TaskFuture},
+    full_trace::Trace,
     scheduler::{RandomTaskSelector, Scheduler},
     sync_model::{SyncEvent, SyncInitEvent},
-    trace::Trace,
 };
 pub mod capture_panics;
 mod executor;
+pub mod full_trace;
 mod scheduler;
 pub mod sync_model;
-pub mod trace;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TaskId(NonZeroU64);

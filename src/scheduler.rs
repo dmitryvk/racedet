@@ -11,9 +11,9 @@ use itertools::Itertools;
 
 use crate::{
     TaskId, Trace,
+    full_trace::{TaskRef, TraceItem},
     scheduler::get_runnable_tasks::{TaskScheduleChoice, get_eligible_scheduler_choices},
     sync_model::{BadSyncError, NotificationOutcome, SyncEvent, SyncInitEvent, SyncModelRegistry},
-    trace::{TaskRef, TraceItem},
 };
 
 mod get_runnable_tasks;
@@ -319,9 +319,9 @@ impl Scheduler {
     fn make_task_snapshot(
         inner: &Inner,
         task_snapshot: &TraceTaskSnapshot,
-    ) -> crate::trace::TaskSnapshot {
+    ) -> crate::full_trace::TaskSnapshot {
         let task = &inner.tasks[Self::task_idx(task_snapshot.task_id)];
-        crate::trace::TaskSnapshot {
+        crate::full_trace::TaskSnapshot {
             id: task_snapshot.task_id,
             name: task.name.clone(),
             position: task_snapshot.point.clone(),
