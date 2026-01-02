@@ -83,6 +83,7 @@ enum TraceEvent {
         suspended_tasks: Vec<TraceTaskSnapshot>,
         options: Vec<Vec<TaskId>>,
     },
+    ReplayDiverged,
 }
 
 struct TraceTaskSnapshot {
@@ -387,6 +388,7 @@ impl Scheduler {
                             })
                             .collect(),
                     },
+                    TraceEvent::ReplayDiverged => TraceItem::ReplayDiverged,
                 })
                 .collect(),
         }
@@ -438,8 +440,8 @@ impl Scheduler {
                 .iter()
                 .take(10)
                 .map(|t| format!(
-                    "{{ id={:?} name={} prev={:?} state={:?} }}",
-                    t.id, t.name, t.prev_suspend_point, t.state
+                    "{{ id={:?}/{:?} name={} prev={:?} state={:?} }}",
+                    t.id, t.stable_id, t.name, t.prev_suspend_point, t.state
                 ))
                 .join(", ")
         );
@@ -534,6 +536,7 @@ impl Scheduler {
                     task_choice
                 } else {
                     if let Some(replay) = &inner.replay {
+                        inner.trace.push(TraceEvent::ReplayDiverged);
                         tracing::error!("task execution has diverged at step {}", replay.next_step);
                         inner.replay = None;
                     }

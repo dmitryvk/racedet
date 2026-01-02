@@ -92,15 +92,11 @@ impl ReplayTrace {
             || !step.suspended_tasks.iter().all(|task| {
                 let name = self.strings.get(task.name).unwrap();
                 let pos = self.strings.get(task.position).unwrap();
-                if suspended_tasks.contains(&(
-                    task.id,
-                    name,
-                    pos,
-                )) {
+                if suspended_tasks.contains(&(task.id, name, pos)) {
                     true
                 } else {
                     tracing::error!(
-                        "replay diverged: suspended tasks don't match: suspended_tasks={suspended_tasks:?} doesn't contain {:?}",
+                        "replay diverged: suspended_tasks={suspended_tasks:?} doesn't contain {:?}",
                         (task.id, name, pos)
                     );
                     false
@@ -108,7 +104,15 @@ impl ReplayTrace {
             })
         {
             tracing::error!(
-                "replay diverged: suspended tasks don't match: {suspended_tasks:?} != {:?}", step.suspended_tasks
+                "replay diverged: suspended tasks don't match: expected {:?}, got {suspended_tasks:?}",
+                step.suspended_tasks
+                    .iter()
+                    .map(|task| (
+                        task.id,
+                        self.strings.get(task.name).unwrap(),
+                        self.strings.get(task.position).unwrap()
+                    ))
+                    .collect_vec()
             );
             return None;
         }
