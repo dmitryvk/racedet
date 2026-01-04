@@ -4,11 +4,11 @@ use conc_checker::{
     capture_panics::capture_panic,
     current_scheduler, execution_point, maybe_with_scheduler, new_scheduler, new_start_barrier,
     sync_event,
-    sync_model::join::{CompletedJoin, StartingJoin},
-    task, with_scheduler, with_start_barrier,
+    sync_model::task_wait::{TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
+    task, with_scheduler, with_start_barrier, with_task_group,
 };
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
-use tokio::spawn;
+use tokio::{spawn, time::sleep};
 
 #[tokio::main]
 async fn main() {
@@ -49,36 +49,48 @@ async fn bar() {
 
     // task_join means that the current task is waiting for nested tasks and should not be scheduled in of itself (but other tasks should be scheduled instead)
     let barrier = new_start_barrier(2);
+    let task_group = TaskGroup::new();
     let task_a = spawn(maybe_with_scheduler(
         current_scheduler(),
-        task("spawn a", with_start_barrier(barrier.clone(), baz(1))),
+        task(
+            "spawn a",
+            with_task_group(task_group, 0, with_start_barrier(barrier.clone(), baz(1))),
+        ),
     ));
     let task_b = spawn(maybe_with_scheduler(
         current_scheduler(),
-        task("spawn b", with_start_barrier(barrier.clone(), baz(2))),
+        task(
+            "spawn b",
+            with_task_group(task_group, 1, with_start_barrier(barrier.clone(), baz(2))),
+        ),
     ));
+    // TODO: sleep is a hack to ensure that spawn happens before the task becomes blocked
+    sleep(Duration::from_millis(1)).await;
     tracing::debug!("sync_event starting join");
-    sync_event(StartingJoin);
+    sync_event(TaskWaitAnyN(task_group, 2));
     tracing::debug!("starting join");
     task_a.await.unwrap();
     task_b.await.unwrap();
     tracing::debug!("joined");
-    sync_event(CompletedJoin);
+    sync_event(TaskWaitCompleted);
     tracing::info!("ok");
     execution_point("joined").await;
 }
 
 async fn baz(n: u32) {
     execution_point("a1").await;
-    sync_event(StartingJoin);
-    spawn(maybe_with_scheduler(
+    let task_group = TaskGroup::new();
+    let r = spawn(maybe_with_scheduler(
         current_scheduler(),
-        // TODO: when multiple tasks finish concurrently,
-        // there is a race between completion of one task and `CompletedJoin` of another task
         task(format!("spawn baz {n}"), execution_point("q")),
-    ))
-    .await
-    .unwrap();
-    sync_event(CompletedJoin);
+    ));
+    // TODO: call TaskWaitAnyN before spawn
+    // TODO: TaskWaitAnyN introduces non-determinism if a child task is spawned when the current task is "blocked"
+    //       this can be solved with "spawn promises"
+    // TODO: sleep is a hack to ensure that spawn happens before the task becomes blocked
+    sleep(Duration::from_millis(1)).await;
+    sync_event(TaskWaitAnyN(task_group, 1));
+    r.await.unwrap();
+    sync_event(TaskWaitCompleted);
     execution_point("a2").await;
 }

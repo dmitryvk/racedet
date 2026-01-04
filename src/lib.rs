@@ -98,6 +98,26 @@ pub fn with_start_barrier_blocking<T>(barrier: StartBarrier, inner: impl FnOnce(
     inner()
 }
 
+pub async fn with_task_group<T>(
+    task_group: sync_model::task_wait::TaskGroup,
+    task_idx: usize,
+    inner: impl Future<Output = T>,
+) -> T {
+    let res = inner.await;
+    sync_event(sync_model::task_wait::TaskCompleted(task_group, task_idx));
+    res
+}
+
+pub fn with_task_group_blocking<T>(
+    task_group: sync_model::task_wait::TaskGroup,
+    task_idx: usize,
+    inner: impl FnOnce() -> T,
+) -> T {
+    let res = inner();
+    sync_event(sync_model::task_wait::TaskCompleted(task_group, task_idx));
+    res
+}
+
 pub async fn task<T>(name: impl Into<String>, inner: impl Future<Output = T>) -> T {
     let _guard;
     let task_id = if let Some(scheduler) = Scheduler::current() {

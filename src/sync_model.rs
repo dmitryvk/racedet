@@ -25,6 +25,7 @@ pub mod join;
 pub mod mutex;
 pub mod rwlock;
 pub mod start_barrier;
+pub mod task_wait;
 pub mod watch;
 
 pub(crate) struct SyncModelRegistry {

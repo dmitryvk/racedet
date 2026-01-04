@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use conc_checker::capture_panics::capture_panic;
-use conc_checker::sync_model::join::{CompletedJoin, StartingJoin};
-use conc_checker::{execution_point, new_start_barrier, task, with_start_barrier};
+use conc_checker::sync_model::task_wait::{TaskGroup, TaskWaitAnyN, TaskWaitCompleted};
+use conc_checker::{execution_point, new_start_barrier, task, with_start_barrier, with_task_group};
 use conc_checker::{new_scheduler, sync_event, with_scheduler};
 use futures::FutureExt;
 use futures::select;
@@ -48,34 +48,44 @@ async fn bar() {
 
     // task_join means that the current task is waiting for nested tasks and should not be scheduled in of itself (but other tasks should be scheduled instead)
     let barrier = new_start_barrier(2);
+    let task_group = TaskGroup::new();
     tracing::debug!("sync_event starting join");
-    sync_event(StartingJoin);
+    sync_event(TaskWaitAnyN(task_group, 2));
     tracing::debug!("starting join");
     join!(
         task(
             "a",
-            with_start_barrier(barrier.clone(), execution_point("a"))
+            with_task_group(
+                task_group,
+                0,
+                with_start_barrier(barrier.clone(), execution_point("a"))
+            )
         ),
         task(
             "b",
-            with_start_barrier(barrier.clone(), execution_point("b"))
+            with_task_group(
+                task_group,
+                1,
+                with_start_barrier(barrier.clone(), execution_point("b"))
+            )
         )
     );
     tracing::debug!("joined");
-    sync_event(CompletedJoin);
+    sync_event(TaskWaitCompleted);
     execution_point("joined").await;
     tracing::info!("ok");
     execution_point("select start").await;
     let barrier = new_start_barrier(3);
+    let task_group = TaskGroup::new();
     tracing::debug!("sync_event starting select");
-    sync_event(StartingJoin);
+    sync_event(TaskWaitAnyN(task_group, 3));
     tracing::debug!("starting select");
     select! {
-        _ = task("c", with_start_barrier(barrier.clone(), execution_point("c"))).fuse() => {},
-        _ = task("d", with_start_barrier(barrier.clone(), execution_point("d"))).fuse() => {},
-        _ = task("sleep", with_start_barrier(barrier.clone(), sleep(Duration::from_millis(10)))).fuse() => {}
+        _ = task("c", with_task_group(task_group, 0, with_start_barrier(barrier.clone(), execution_point("c")))).fuse() => {},
+        _ = task("d", with_task_group(task_group, 1, with_start_barrier(barrier.clone(), execution_point("d")))).fuse() => {},
+        _ = task("sleep", with_task_group(task_group, 2, with_start_barrier(barrier.clone(), sleep(Duration::from_millis(10))))).fuse() => {}
     }
     tracing::debug!("done select");
-    sync_event(CompletedJoin);
+    sync_event(TaskWaitCompleted);
     execution_point("selected").await;
 }

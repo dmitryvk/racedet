@@ -3,8 +3,8 @@ use std::time::Duration;
 use conc_checker::{
     capture_panics::capture_panic,
     execution_point, new_scheduler, sync_event,
-    sync_model::join::{CompletedJoin, StartingJoin},
-    task, with_scheduler,
+    sync_model::task_wait::{TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
+    task, with_scheduler, with_task_group,
 };
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
@@ -41,23 +41,27 @@ async fn main() {
 }
 
 async fn foo() {
+    let task_group = TaskGroup::new();
     let futs: FuturesUnordered<_> = (0..3)
         .map(|i| async move {
-            task(format!("fut {i}"), async {
-                execution_point("a").await;
-                i
-            })
+            task(
+                format!("fut {i}"),
+                with_task_group(task_group, i, async {
+                    execution_point("a").await;
+                    i
+                }),
+            )
             .await
         })
         .collect();
     let mut results: Vec<_> = task("main", async {
         tracing::debug!("sync_event starting collect");
-        sync_event(StartingJoin);
+        sync_event(TaskWaitAnyN(task_group, 3));
         tracing::debug!("starting collect");
 
         let res = futs.collect().await;
         tracing::debug!("joined");
-        sync_event(CompletedJoin);
+        sync_event(TaskWaitCompleted);
         execution_point("joined").await;
         res
     })
