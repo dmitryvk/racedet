@@ -536,6 +536,7 @@ impl Scheduler {
                                 replay.next_step
                             );
                             inner.error = Some(msg.clone());
+                            self.task_notify.notify_waiters();
                             panic!("{msg}");
                         }
                     };
@@ -561,6 +562,7 @@ impl Scheduler {
                             replay.next_step
                         );
                         inner.error = Some(msg.clone());
+                        self.task_notify.notify_waiters();
                         panic!("{msg}");
                     };
                     tracing::debug!("replayed step {}", replay.next_step);
