@@ -84,9 +84,12 @@ impl ReplayTrace {
         &self,
         step_idx: usize,
         suspended_tasks: &HashSet<(TaskStableId, &str, &str)>,
-    ) -> Option<&[TaskStableId]> {
+    ) -> Result<&[TaskStableId], String> {
         tracing::debug!("strings={:?}", self.strings);
-        let step = self.steps.get(step_idx)?;
+        let step = self
+            .steps
+            .get(step_idx)
+            .ok_or_else(|| "no more steps".to_owned())?;
         tracing::debug!("step={step:?}");
         if step.suspended_tasks.len() != suspended_tasks.len()
             || !step.suspended_tasks.iter().all(|task| {
@@ -103,7 +106,7 @@ impl ReplayTrace {
                 }
             })
         {
-            tracing::error!(
+            Err(format!(
                 "replay diverged: suspended tasks don't match: expected {:?}, got {suspended_tasks:?}",
                 step.suspended_tasks
                     .iter()
@@ -113,11 +116,10 @@ impl ReplayTrace {
                         self.strings.get(task.position).unwrap()
                     ))
                     .collect_vec()
-            );
-            return None;
+            ))
+        } else {
+            Ok(&step.resumed_tasks)
         }
-
-        Some(&step.resumed_tasks)
     }
 }
 

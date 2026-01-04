@@ -39,6 +39,7 @@ struct Inner {
     trace: Vec<TraceEvent>,
     sync_model: SyncModelRegistry,
     replay: Option<ReplayState>,
+    error: Option<String>,
 }
 
 struct ReplayState {
@@ -83,7 +84,6 @@ enum TraceEvent {
         suspended_tasks: Vec<TraceTaskSnapshot>,
         options: Vec<Vec<TaskId>>,
     },
-    ReplayDiverged,
 }
 
 struct TraceTaskSnapshot {
@@ -121,6 +121,7 @@ impl Scheduler {
                     trace,
                     next_step: 0,
                 }),
+                error: None,
             }),
             scheduler_notify: tokio::sync::Notify::new(),
             task_notify: tokio::sync::Notify::new(),
@@ -250,6 +251,9 @@ impl Scheduler {
             notified.as_mut().enable();
             {
                 let mut inner = self.lock();
+                if let Some(err) = &inner.error {
+                    panic!("scheduler error: {err}");
+                }
                 let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
                 if matches!(task.state, TaskState::Running) {
                     tracing::debug!("task {task_id:?} resumed from {name}");
@@ -310,6 +314,9 @@ impl Scheduler {
             notified.as_mut().enable();
             {
                 let mut inner = self.lock();
+                if let Some(err) = &inner.error {
+                    panic!("scheduler error: {err}");
+                }
                 let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
                 if matches!(task.state, TaskState::Running) {
                     tracing::debug!("task {task_id:?} resumed from {name}");
@@ -388,7 +395,6 @@ impl Scheduler {
                             })
                             .collect(),
                     },
-                    TraceEvent::ReplayDiverged => TraceItem::ReplayDiverged,
                 })
                 .collect(),
         }
@@ -502,8 +508,8 @@ impl Scheduler {
                 tracing::debug!("no ready tasks!");
             }
             NextSchedulerAction::Choices(choices) => {
-                let task_choice = if let Some(replay) = &mut inner.replay
-                    && let suspended_tasks = inner
+                let task_choice = if let Some(replay) = &mut inner.replay {
+                    let suspended_tasks = inner
                         .tasks
                         .iter()
                         .filter_map(|task| match &task.state {
@@ -514,11 +520,26 @@ impl Scheduler {
                             )),
                             _ => None,
                         })
-                        .collect::<HashSet<_>>()
-                    && let Some(resumed_tasks) = replay
+                        .collect::<HashSet<_>>();
+                    let resumed_tasks = match replay
                         .trace
                         .get_resumed_tasks(replay.next_step, &suspended_tasks)
-                    && let Some(task_choice) = choices.iter().find(|choice| {
+                    {
+                        Ok(tasks) => tasks,
+                        Err(err) => {
+                            tracing::error!(
+                                "task execution has diverged at step {}: {err}",
+                                replay.next_step
+                            );
+                            let msg = format!(
+                                "task execution has diverged at step {}: {err}",
+                                replay.next_step
+                            );
+                            inner.error = Some(msg.clone());
+                            panic!("{msg}");
+                        }
+                    };
+                    let Some(task_choice) = choices.iter().find(|choice| {
                         choice.to_run.len() == resumed_tasks.len()
                             && choice
                                 .to_run
@@ -530,16 +551,22 @@ impl Scheduler {
                                 })
                                 .collect::<HashSet<_>>()
                                 == HashSet::from_iter(resumed_tasks.iter().copied())
-                    }) {
+                    }) else {
+                        tracing::error!(
+                            "task execution has diverged at step {}: did not find resumed_tasks {resumed_tasks:?} among possible choices {choices:?}",
+                            replay.next_step
+                        );
+                        let msg = format!(
+                            "task execution has diverged at step {}: did not find resumed_tasks {resumed_tasks:?} among possible choices {choices:?}",
+                            replay.next_step
+                        );
+                        inner.error = Some(msg.clone());
+                        panic!("{msg}");
+                    };
                     tracing::debug!("replayed step {}", replay.next_step);
                     replay.next_step += 1;
                     task_choice
                 } else {
-                    if let Some(replay) = &inner.replay {
-                        inner.trace.push(TraceEvent::ReplayDiverged);
-                        tracing::error!("task execution has diverged at step {}", replay.next_step);
-                        inner.replay = None;
-                    }
                     inner.task_selector.choose_next_running_task(&choices)
                 };
 

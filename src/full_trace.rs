@@ -37,7 +37,6 @@ pub enum TraceItem {
         suspended_tasks: BTreeSet<TaskSnapshot>,
         options: Vec<BTreeSet<TaskRef>>,
     },
-    ReplayDiverged,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -107,7 +106,6 @@ impl std::fmt::Display for TraceItem {
                     ))
                     .join(", "),
             ),
-            TraceItem::ReplayDiverged => write!(f, "replay diverged"),
         }
     }
 }
