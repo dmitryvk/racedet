@@ -1,7 +1,5 @@
 use std::{collections::HashSet, sync::Arc};
 
-use itertools::Itertools;
-
 use crate::{
     TaskStableId,
     full_trace::{Trace, TraceItem},
@@ -152,36 +150,45 @@ impl ReplayTrace {
             .ok_or_else(|| "no more steps".to_owned())?;
         tracing::debug!("step={step:?}");
         if step.suspended_tasks.len() != suspended_tasks.len()
-            || !step.suspended_tasks.iter().all(|task| {
-                if suspended_tasks.contains(&(task.id, task.name, task.position)) {
-                    true
-                } else {
-                    tracing::error!(
-                        "replay diverged: suspended_tasks={suspended_tasks:?} doesn't contain {:?}",
-                        (
-                            task.id,
-                            self.strings
-                                .get(task.name)
-                                .expect("string pool contains all strings"),
-                            self.strings
-                                .get(task.position)
-                                .expect("string pool has all strings")
-                        )
-                    );
-                    false
-                }
-            })
+            || !step
+                .suspended_tasks
+                .iter()
+                .all(|task| suspended_tasks.contains(&(task.id, task.name, task.position)))
         {
-            Err(format!(
-                "replay diverged: suspended tasks don't match: expected {:?}, got {suspended_tasks:?}",
-                step.suspended_tasks
-                    .iter()
-                    .map(|task| (
+            let mut expected = step
+                .suspended_tasks
+                .iter()
+                .map(|task| {
+                    (
                         task.id,
-                        self.strings.get(task.name).unwrap(),
-                        self.strings.get(task.position).unwrap()
-                    ))
-                    .collect_vec()
+                        self.strings
+                            .get(task.name)
+                            .expect("string pool contains all strings"),
+                        self.strings
+                            .get(task.position)
+                            .expect("string pool has all strings"),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let mut actual = suspended_tasks
+                .iter()
+                .map(|(id, name, position)| {
+                    (
+                        id,
+                        self.strings
+                            .get(*name)
+                            .expect("string pool contains all strings"),
+                        self.strings
+                            .get(*position)
+                            .expect("string pool has all strings"),
+                    )
+                })
+                .collect::<Vec<_>>();
+            expected.sort();
+            actual.sort();
+            tracing::error!("replay diverged: expected {expected:?}, got {actual:?}");
+            Err(format!(
+                "replay diverged: suspended tasks don't match: expected {expected:?}, got {actual:?}"
             ))
         } else {
             Ok(&step.resumed_tasks)
