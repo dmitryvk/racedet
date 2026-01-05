@@ -7,18 +7,19 @@ use tokio::sync::Barrier;
 use crate::{
     executor::{CurrentTaskIdGuard, TaskFuture},
     full_trace::Trace,
-    replay_trace::ReplayTrace,
     scheduler::{RandomTaskSelector, Scheduler},
-    string_pool::StringPool,
     sync_model::{SyncEvent, SyncInitEvent},
 };
 pub mod capture_panics;
 mod executor;
 pub mod full_trace;
 mod replay_trace;
+mod replay_trace_parsed;
 mod scheduler;
 mod string_pool;
 pub mod sync_model;
+
+pub use replay_trace_parsed::{ParseError, ReplayTrace};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TaskId(NonZeroU64);
@@ -164,14 +165,10 @@ impl Drop for TaskFinishedGuard {
 #[derive(Clone)]
 pub struct SchedulerHandle(Arc<Scheduler>);
 
-pub fn new_scheduler(replay: Option<&str>) -> (SchedulerHandle, impl Future<Output = ()> + use<>) {
-    let string_pool = Arc::new(StringPool::new());
-    let replay: Option<ReplayTrace> = replay
-        .map(|s| ReplayTrace::from_str(string_pool.clone(), s))
-        .transpose()
-        .expect("TODO: return error");
+pub fn new_scheduler(
+    replay: Option<&ReplayTrace>,
+) -> (SchedulerHandle, impl Future<Output = ()> + use<>) {
     let scheduler = SchedulerHandle(Scheduler::new(
-        string_pool,
         replay,
         scheduler::TaskSelector::Random(RandomTaskSelector::new()),
     ));
@@ -193,7 +190,8 @@ impl SchedulerHandle {
     }
 
     pub fn get_replay(&self) -> ReplayTrace {
-        ReplayTrace::from_trace(self.0.string_pool(), &self.0.get_trace())
+        crate::replay_trace::ReplayTrace::from_trace(self.0.string_pool(), &self.0.get_trace())
+            .to_parsed()
     }
 
     pub fn new_start_barrier(&self, task_count: usize) -> StartBarrier {

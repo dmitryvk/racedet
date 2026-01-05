@@ -11,7 +11,8 @@ use axum::{
     routing::{get, post},
 };
 use conc_checker::{
-    SchedulerHandle, StartBarrier, execution_point, new_scheduler, task, with_start_barrier,
+    ReplayTrace, SchedulerHandle, StartBarrier, execution_point, new_scheduler, task,
+    with_start_barrier,
 };
 use futures::{FutureExt, future::BoxFuture};
 use hyper::StatusCode;
@@ -282,7 +283,8 @@ impl SchedulerRegistry {
                 )
             }
             Entry::Vacant(entry) => {
-                let (scheduler, scheduler_fut) = new_scheduler(replay);
+                let replay = replay.map(|s| ReplayTrace::from_str(s).unwrap());
+                let (scheduler, scheduler_fut) = new_scheduler(replay.as_ref());
                 let barrier = scheduler.new_start_barrier(task_count);
                 let cancellation_token = CancellationToken::new();
                 let id = entry.key().clone();

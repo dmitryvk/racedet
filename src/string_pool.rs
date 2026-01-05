@@ -17,6 +17,12 @@ struct Inner {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct StringIdx(usize);
 
+impl StringIdx {
+    pub(crate) fn as_usize(self) -> usize {
+        self.0
+    }
+}
+
 impl StringPool {
     pub(crate) fn new() -> Self {
         Self {

@@ -1,4 +1,4 @@
-use std::{collections::HashSet, str::FromStr, sync::Arc};
+use std::{collections::HashSet, sync::Arc};
 
 use itertools::Itertools;
 
@@ -9,13 +9,13 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct ReplayTrace {
+pub(crate) struct ReplayTrace {
     strings: Arc<StringPool>,
     steps: Vec<ReplayStep>,
 }
 
 #[derive(Debug, Clone)]
-pub struct ReplayStep {
+struct ReplayStep {
     suspended_tasks: Vec<SuspendedTask>,
     resumed_tasks: Vec<TaskStableId>,
 }
@@ -28,6 +28,76 @@ struct SuspendedTask {
 }
 
 impl ReplayTrace {
+    pub(crate) fn from_parsed(
+        string_pool: Arc<StringPool>,
+        trace: &crate::replay_trace_parsed::ReplayTrace,
+    ) -> Self {
+        let string_ids: Vec<StringIdx> = trace
+            .strings
+            .iter()
+            .map(|s| string_pool.intern(s))
+            .collect();
+        let steps = trace
+            .steps
+            .iter()
+            .map(|s| ReplayStep {
+                suspended_tasks: s
+                    .suspended_tasks
+                    .iter()
+                    .map(|t| SuspendedTask {
+                        id: t.id,
+                        name: string_ids[t.name as usize - 1],
+                        position: string_ids[t.position as usize - 1],
+                    })
+                    .collect(),
+                resumed_tasks: s.resumed_tasks.clone(),
+            })
+            .collect();
+        Self {
+            strings: string_pool,
+            steps,
+        }
+    }
+
+    pub(crate) fn to_parsed(&self) -> crate::replay_trace_parsed::ReplayTrace {
+        let new_string_pool = StringPool::new();
+        let steps = self
+            .steps
+            .iter()
+            .map(|s| crate::replay_trace_parsed::ReplayStep {
+                suspended_tasks: s
+                    .suspended_tasks
+                    .iter()
+                    .map(|t| crate::replay_trace_parsed::SuspendedTask {
+                        id: t.id,
+                        name: new_string_pool
+                            .intern(
+                                &self
+                                    .strings
+                                    .get(t.name)
+                                    .expect("string pool has all strings"),
+                            )
+                            .as_usize() as u32,
+                        position: new_string_pool
+                            .intern(
+                                &self
+                                    .strings
+                                    .get(t.position)
+                                    .expect("string pool has all strings"),
+                            )
+                            .as_usize() as u32,
+                    })
+                    .collect(),
+                resumed_tasks: s.resumed_tasks.clone(),
+            })
+            .collect::<Vec<_>>();
+        let strings = new_string_pool
+            .iter_ordered()
+            .map(|(_, s)| s.as_ref().to_owned())
+            .collect::<Vec<_>>();
+        crate::replay_trace_parsed::ReplayTrace { strings, steps }
+    }
+
     pub(crate) fn from_trace(string_pool: Arc<StringPool>, trace: &Trace) -> Self {
         let steps = trace
             .trace
@@ -116,114 +186,5 @@ impl ReplayTrace {
         } else {
             Ok(&step.resumed_tasks)
         }
-    }
-}
-
-impl std::fmt::Display for ReplayTrace {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let new_string_pool = StringPool::new();
-        let mut written = false;
-        for step in &self.steps {
-            if written {
-                write!(f, ";")?;
-            }
-            write!(
-                f,
-                "{suspended}/{resumed}",
-                suspended = step
-                    .suspended_tasks
-                    .iter()
-                    .map(|task| format!(
-                        "{id}-{name}-{position}",
-                        id = task.id,
-                        name = new_string_pool.intern(
-                            &self
-                                .strings
-                                .get(task.name)
-                                .expect("string pool has all strings")
-                        ),
-                        position = new_string_pool.intern(
-                            &self
-                                .strings
-                                .get(task.position)
-                                .expect("string pool has all strings")
-                        ),
-                    ))
-                    .join(","),
-                resumed = step
-                    .resumed_tasks
-                    .iter()
-                    .map(|id| format!("{id}"))
-                    .join(","),
-            )?;
-            written = true;
-        }
-        write!(f, "#")?;
-        let mut written = false;
-        for (_, s) in new_string_pool.iter_ordered() {
-            if written {
-                write!(f, ",")?;
-            }
-            // TODO: escaping
-            write!(f, "{s}")?;
-            written = true;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub struct ParseError(&'static str);
-
-impl std::fmt::Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for ParseError {}
-
-impl ReplayTrace {
-    pub(crate) fn from_str(strings: Arc<StringPool>, s: &str) -> Result<Self, ParseError> {
-        let (s_steps, s_strings) = s.split_once('#').ok_or(ParseError("no #"))?;
-        tracing::debug!("s_strings={s_strings}");
-
-        let string_ids: Vec<StringIdx> = s_strings.split(',').map(|s| strings.intern(s)).collect();
-
-        let mut steps = Vec::new();
-        for step in s_steps.split(';') {
-            steps.push(ReplayStep::from_str(&string_ids, step)?);
-        }
-
-        Ok(Self { strings, steps })
-    }
-}
-
-impl ReplayStep {
-    fn from_str(strings: &[StringIdx], s: &str) -> Result<Self, ParseError> {
-        let (s_suspended, s_resumed) = s.split_once('/').ok_or(ParseError("no /"))?;
-        let mut suspended = Vec::new();
-        let mut resumed = Vec::new();
-        for task in s_suspended.split(',') {
-            let [s_id, s_name, s_position] = task
-                .split('-')
-                .collect_array()
-                .ok_or(ParseError("wrong number of -"))?;
-            let id = TaskStableId(s_id.parse().map_err(|_| ParseError("parse task id"))?);
-            let name =
-                strings[usize::from_str(s_name).map_err(|_| ParseError("parse task name"))? - 1];
-            let position = strings
-                [usize::from_str(s_position).map_err(|_| ParseError("parse task position"))? - 1];
-            suspended.push(SuspendedTask { id, name, position })
-        }
-        for task in s_resumed.split(',') {
-            let task_id = TaskStableId(task.parse().map_err(|_| ParseError("parse task id"))?);
-            resumed.push(task_id);
-        }
-
-        Ok(Self {
-            suspended_tasks: suspended,
-            resumed_tasks: resumed,
-        })
     }
 }

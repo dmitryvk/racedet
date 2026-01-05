@@ -1,6 +1,7 @@
-use std::time::Duration;
+use std::{str::FromStr, time::Duration};
 
 use conc_checker::{
+    ReplayTrace,
     capture_panics::capture_panic,
     execution_point, new_scheduler, sync_event,
     sync_model::task_wait::{TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
@@ -13,8 +14,10 @@ use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    let replay = std::env::var("CONC_CHECKER_REPLAY").ok();
-    let (scheduler, control_fut) = new_scheduler(replay.as_deref());
+    let replay = std::env::var("CONC_CHECKER_REPLAY")
+        .ok()
+        .map(|s| ReplayTrace::from_str(&s).unwrap());
+    let (scheduler, control_fut) = new_scheduler(replay.as_ref());
     tokio::spawn(control_fut);
     let res = timeout(
         Duration::from_secs(10),
@@ -37,7 +40,7 @@ async fn main() {
         }
     }
     println!("{}", scheduler.get_trace());
-    println!("{}", scheduler.get_replay());
+    println!("CONC_CHECKER_REPLAY=\"{}\"", scheduler.get_replay());
 }
 
 async fn foo() {

@@ -107,17 +107,14 @@ impl RandomTaskSelector {
 
 impl Scheduler {
     pub(crate) fn new(
-        string_pool: Arc<StringPool>,
-        replay: Option<ReplayTrace>,
+        replay: Option<&crate::replay_trace_parsed::ReplayTrace>,
         task_selector: TaskSelector,
     ) -> Arc<Self> {
-        tracing::debug!(
-            "replaying {}",
-            replay
-                .as_ref()
-                .map(|replay| replay.to_string())
-                .unwrap_or_default()
-        );
+        let string_pool = Arc::new(StringPool::new());
+        let replay = replay.map(|replay| {
+            tracing::debug!("replaying {replay}");
+            ReplayTrace::from_parsed(string_pool.clone(), replay)
+        });
         Arc::new(Scheduler {
             string_pool,
             inner: Mutex::new(Inner {

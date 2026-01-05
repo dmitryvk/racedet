@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -5,7 +6,7 @@ use conc_checker::capture_panics::capture_panic;
 use conc_checker::sync_model::rwlock::{
     LockedRwlock, LockingRwlock, ReleasedRwlock, RwlockId, RwlockMode,
 };
-use conc_checker::{execution_point, new_start_barrier, task, with_start_barrier};
+use conc_checker::{ReplayTrace, execution_point, new_start_barrier, task, with_start_barrier};
 use conc_checker::{new_scheduler, sync_event, with_scheduler};
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
 use tokio::join;
@@ -14,8 +15,10 @@ use tokio::sync::RwLock;
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    let replay = std::env::var("CONC_CHECKER_REPLAY").ok();
-    let (scheduler, control_fut) = new_scheduler(replay.as_deref());
+    let replay = std::env::var("CONC_CHECKER_REPLAY")
+        .ok()
+        .map(|s| ReplayTrace::from_str(&s).unwrap());
+    let (scheduler, control_fut) = new_scheduler(replay.as_ref());
     tokio::spawn(control_fut);
     let res = timeout(
         Duration::from_secs(10),
@@ -38,7 +41,7 @@ async fn main() {
         }
     }
     println!("{}", scheduler.get_trace());
-    println!("{}", scheduler.get_replay());
+    println!("CONC_CHECKER_REPLAY=\"{}\"", scheduler.get_replay());
 }
 
 async fn foo() {
