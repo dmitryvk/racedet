@@ -15,8 +15,9 @@ use crate::{
 pub struct TaskGroup(u64);
 
 impl TaskGroup {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        const NEXT_ID: AtomicU64 = AtomicU64::new(0);
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
         let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Self(id)
     }
