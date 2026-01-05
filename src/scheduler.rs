@@ -16,6 +16,7 @@ use crate::{
     scheduler::get_runnable_tasks::{
         NextSchedulerAction, TaskScheduleChoice, get_eligible_scheduler_choices,
     },
+    string_pool::{StringIdx, StringPool},
     sync_model::{BadSyncError, NotificationOutcome, SyncEvent, SyncInitEvent, SyncModelRegistry},
 };
 
@@ -26,6 +27,7 @@ thread_local! {
 }
 
 pub(crate) struct Scheduler {
+    string_pool: Arc<StringPool>,
     inner: Mutex<Inner>,
     scheduler_notify: tokio::sync::Notify,
     task_notify: tokio::sync::Notify,
@@ -50,15 +52,15 @@ struct ReplayState {
 pub(crate) struct Task {
     id: TaskId,
     stable_id: Option<TaskStableId>,
-    name: String,
-    prev_suspend_point: Option<String>,
+    name: StringIdx,
+    prev_suspend_point: Option<StringIdx>,
     state: TaskState,
 }
 
 #[derive(Debug)]
 enum TaskState {
     // The task is ready to be executed (at suspension point)
-    Suspended { point: String },
+    Suspended { point: StringIdx },
     // The task is currently running.
     // There can be more than one running task in case a task becomes blocked while it was running
     Running,
@@ -71,7 +73,7 @@ enum TraceEvent {
     TaskFinished(TaskId),
     TaskSuspended {
         task: TaskId,
-        suspend_point: String,
+        suspend_point: StringIdx,
     },
     AutoResumedTasks {
         resumed_tasks: Vec<TaskId>,
@@ -88,7 +90,7 @@ enum TraceEvent {
 
 struct TraceTaskSnapshot {
     task_id: TaskId,
-    point: Option<String>,
+    point: Option<StringIdx>,
 }
 
 pub(crate) enum TaskSelector {
@@ -104,12 +106,20 @@ impl RandomTaskSelector {
 }
 
 impl Scheduler {
-    pub(crate) fn new(replay: Option<ReplayTrace>, task_selector: TaskSelector) -> Arc<Self> {
+    pub(crate) fn new(
+        string_pool: Arc<StringPool>,
+        replay: Option<ReplayTrace>,
+        task_selector: TaskSelector,
+    ) -> Arc<Self> {
         tracing::debug!(
             "replaying {}",
-            replay.as_ref().map(ToString::to_string).unwrap_or_default()
+            replay
+                .as_ref()
+                .map(|replay| replay.to_string())
+                .unwrap_or_default()
         );
         Arc::new(Scheduler {
+            string_pool,
             inner: Mutex::new(Inner {
                 next_task_id: 1,
                 next_stable_task_id: 1,
@@ -139,6 +149,10 @@ impl Scheduler {
         })
     }
 
+    pub(crate) fn string_pool(&self) -> Arc<StringPool> {
+        self.string_pool.clone()
+    }
+
     fn lock(&self) -> MutexGuard<'_, Inner> {
         match self.inner.lock() {
             Ok(guard) => guard,
@@ -149,7 +163,8 @@ impl Scheduler {
         }
     }
 
-    pub(crate) fn register_task(&self, name: String) -> TaskId {
+    pub(crate) fn register_task(&self, name: &str) -> TaskId {
+        let name = self.string_pool.intern(name);
         let mut inner = self.lock();
         let id = TaskId(NonZeroU64::new(inner.next_task_id).unwrap());
         tracing::debug!("task {id:?} {name} registered");
@@ -219,6 +234,7 @@ impl Scheduler {
 
     pub(crate) async fn on_reached_point(&self, task_id: TaskId, name: &str) {
         tracing::debug!("reached point {task_id:?} {name}");
+        let name = self.string_pool.intern(name);
 
         {
             let mut guard = self.lock();
@@ -228,7 +244,7 @@ impl Scheduler {
                 TaskState::Running => {
                     inner.trace.push(TraceEvent::TaskSuspended {
                         task: task_id,
-                        suspend_point: name.to_string(),
+                        suspend_point: name,
                     });
                 }
                 TaskState::Suspended { .. } | TaskState::Finished => {
@@ -240,9 +256,7 @@ impl Scheduler {
                 );
                 }
             }
-            task.state = TaskState::Suspended {
-                point: name.to_string(),
-            };
+            task.state = TaskState::Suspended { point: name };
             drop(guard);
         }
         self.scheduler_notify.notify_waiters();
@@ -271,6 +285,7 @@ impl Scheduler {
         event: T,
     ) -> Result<(), BadSyncError> {
         tracing::debug!("reached point {task_id:?} {name}");
+        let name = self.string_pool.intern(name);
 
         {
             let mut guard = self.lock();
@@ -291,7 +306,7 @@ impl Scheduler {
                 TaskState::Running => {
                     inner.trace.push(TraceEvent::TaskSuspended {
                         task: task_id,
-                        suspend_point: name.to_string(),
+                        suspend_point: name,
                     });
                 }
                 TaskState::Suspended { .. } | TaskState::Finished => {
@@ -303,9 +318,7 @@ impl Scheduler {
                 );
                 }
             }
-            task.state = TaskState::Suspended {
-                point: name.to_string(),
-            };
+            task.state = TaskState::Suspended { point: name };
             drop(guard);
         }
         self.scheduler_notify.notify_waiters();
@@ -337,17 +350,20 @@ impl Scheduler {
                 .iter()
                 .map(|trace_event| match trace_event {
                     TraceEvent::TaskStarted(task_id) => {
-                        TraceItem::TaskStarted(Self::make_task_ref(&inner, *task_id))
+                        TraceItem::TaskStarted(self.make_task_ref(&inner, *task_id))
                     }
                     TraceEvent::TaskFinished(task_id) => {
-                        TraceItem::TaskFinished(Self::make_task_ref(&inner, *task_id))
+                        TraceItem::TaskFinished(self.make_task_ref(&inner, *task_id))
                     }
                     TraceEvent::TaskSuspended {
                         task,
                         suspend_point,
                     } => TraceItem::TaskSuspended {
-                        task: Self::make_task_ref(&inner, *task),
-                        suspend_point: suspend_point.clone(),
+                        task: self.make_task_ref(&inner, *task),
+                        suspend_point: self
+                            .string_pool
+                            .get(*suspend_point)
+                            .expect("string_pool has all string from trace"),
                     },
                     TraceEvent::AutoResumedTasks {
                         resumed_tasks,
@@ -356,15 +372,15 @@ impl Scheduler {
                     } => TraceItem::AutoResumedTasks {
                         resumed_tasks: resumed_tasks
                             .iter()
-                            .map(|task_id| Self::make_task_ref(&inner, *task_id))
+                            .map(|task_id| self.make_task_ref(&inner, *task_id))
                             .collect(),
                         running_tasks: running_tasks
                             .iter()
-                            .map(|task_snapshot| Self::make_task_snapshot(&inner, task_snapshot))
+                            .map(|task_snapshot| self.make_task_snapshot(&inner, task_snapshot))
                             .collect(),
                         suspended_tasks: suspended_tasks
                             .iter()
-                            .map(|task_snapshot| Self::make_task_snapshot(&inner, task_snapshot))
+                            .map(|task_snapshot| self.make_task_snapshot(&inner, task_snapshot))
                             .collect(),
                     },
                     TraceEvent::ScheduleDecision {
@@ -375,22 +391,22 @@ impl Scheduler {
                     } => TraceItem::ScheduleDecision {
                         resumed_tasks: resumed_tasks
                             .iter()
-                            .map(|task_id| Self::make_task_ref(&inner, *task_id))
+                            .map(|task_id| self.make_task_ref(&inner, *task_id))
                             .collect(),
                         running_tasks: running_tasks
                             .iter()
-                            .map(|task_snapshot| Self::make_task_snapshot(&inner, task_snapshot))
+                            .map(|task_snapshot| self.make_task_snapshot(&inner, task_snapshot))
                             .collect(),
                         suspended_tasks: suspended_tasks
                             .iter()
-                            .map(|task_snapshot| Self::make_task_snapshot(&inner, task_snapshot))
+                            .map(|task_snapshot| self.make_task_snapshot(&inner, task_snapshot))
                             .collect(),
                         options: options
                             .iter()
                             .map(|tasks| {
                                 tasks
                                     .iter()
-                                    .map(|task_id| Self::make_task_ref(&inner, *task_id))
+                                    .map(|task_id| self.make_task_ref(&inner, *task_id))
                                     .collect()
                             })
                             .collect(),
@@ -400,27 +416,41 @@ impl Scheduler {
         }
     }
 
-    fn make_task_ref(inner: &Inner, task_id: TaskId) -> TaskRef {
+    fn make_task_ref(&self, inner: &Inner, task_id: TaskId) -> TaskRef {
         let task = &inner.tasks[Self::task_idx(task_id)];
+        let name = self
+            .string_pool
+            .get(task.name)
+            .expect("string_pool has all strings from tasks");
         TaskRef {
             id: task
                 .stable_id
                 .map_or(FullTraceTaskId::Unstable(task.id), FullTraceTaskId::Stable),
-            name: task.name.clone(),
+            name,
         }
     }
 
     fn make_task_snapshot(
+        &self,
         inner: &Inner,
         task_snapshot: &TraceTaskSnapshot,
     ) -> crate::full_trace::TaskSnapshot {
         let task = &inner.tasks[Self::task_idx(task_snapshot.task_id)];
+        let name = self
+            .string_pool
+            .get(task.name)
+            .expect("string pool has all strings");
+        let point = task_snapshot.point.map(|point| {
+            self.string_pool
+                .get(point)
+                .expect("string pool has all strings")
+        });
         crate::full_trace::TaskSnapshot {
             id: task
                 .stable_id
                 .map_or(FullTraceTaskId::Unstable(task.id), FullTraceTaskId::Stable),
-            name: task.name.clone(),
-            position: task_snapshot.point.clone(),
+            name,
+            position: point,
         }
     }
 
@@ -460,7 +490,8 @@ impl Scheduler {
             if new_tasks.peek().is_some() {
                 let mut new_tasks: Vec<&mut Task> = new_tasks.collect();
                 new_tasks.sort_by(|task_1, task_2| {
-                    (&task_1.name, task_1.id).cmp(&(&task_2.name, task_2.id))
+                    (self.string_pool.get(task_1.name), task_1.id)
+                        .cmp(&(self.string_pool.get(task_2.name), task_2.id))
                 });
                 for new_task in new_tasks {
                     let stable_id =
@@ -515,8 +546,8 @@ impl Scheduler {
                         .filter_map(|task| match &task.state {
                             TaskState::Suspended { point } => Some((
                                 task.stable_id.expect("suspended tasks have stable id"),
-                                task.name.as_str(),
-                                point.as_str(),
+                                task.name,
+                                *point,
                             )),
                             _ => None,
                         })
@@ -621,8 +652,8 @@ impl Scheduler {
             let snapshot = TraceTaskSnapshot {
                 task_id: task.id,
                 point: match &task.state {
-                    TaskState::Suspended { point } => Some(point.clone()),
-                    TaskState::Running | TaskState::Finished => task.prev_suspend_point.clone(),
+                    TaskState::Suspended { point } => Some(*point),
+                    TaskState::Running | TaskState::Finished => task.prev_suspend_point,
                 },
             };
             match &task.state {

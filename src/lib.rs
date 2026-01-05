@@ -1,4 +1,4 @@
-use std::{num::NonZeroU64, str::FromStr, sync::Arc, task::Poll};
+use std::{num::NonZeroU64, sync::Arc, task::Poll};
 
 use futures::executor::block_on;
 use pin_project::pin_project;
@@ -9,6 +9,7 @@ use crate::{
     full_trace::Trace,
     replay_trace::ReplayTrace,
     scheduler::{RandomTaskSelector, Scheduler},
+    string_pool::StringPool,
     sync_model::{SyncEvent, SyncInitEvent},
 };
 pub mod capture_panics;
@@ -16,6 +17,7 @@ mod executor;
 pub mod full_trace;
 mod replay_trace;
 mod scheduler;
+mod string_pool;
 pub mod sync_model;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -118,10 +120,10 @@ pub fn with_task_group_blocking<T>(
     res
 }
 
-pub async fn task<T>(name: impl Into<String>, inner: impl Future<Output = T>) -> T {
+pub async fn task<T>(name: impl AsRef<str>, inner: impl Future<Output = T>) -> T {
     let _guard;
     let task_id = if let Some(scheduler) = Scheduler::current() {
-        let task_id = scheduler.register_task(name.into());
+        let task_id = scheduler.register_task(name.as_ref());
         _guard = TaskFinishedGuard {
             task_id,
             scheduler: scheduler.clone(),
@@ -133,10 +135,10 @@ pub async fn task<T>(name: impl Into<String>, inner: impl Future<Output = T>) ->
     TaskFuture::new(inner, task_id).await
 }
 
-pub fn task_blocking<T>(name: impl Into<String>, inner: impl FnOnce() -> T) -> T {
+pub fn task_blocking<T>(name: impl AsRef<str>, inner: impl FnOnce() -> T) -> T {
     let _guard;
     if let Some(scheduler) = Scheduler::current() {
-        let task_id = scheduler.register_task(name.into());
+        let task_id = scheduler.register_task(name.as_ref());
         _guard = (
             TaskFinishedGuard {
                 task_id,
@@ -163,11 +165,13 @@ impl Drop for TaskFinishedGuard {
 pub struct SchedulerHandle(Arc<Scheduler>);
 
 pub fn new_scheduler(replay: Option<&str>) -> (SchedulerHandle, impl Future<Output = ()> + use<>) {
+    let string_pool = Arc::new(StringPool::new());
     let replay: Option<ReplayTrace> = replay
-        .map(FromStr::from_str)
+        .map(|s| ReplayTrace::from_str(string_pool.clone(), s))
         .transpose()
         .expect("TODO: return error");
     let scheduler = SchedulerHandle(Scheduler::new(
+        string_pool,
         replay,
         scheduler::TaskSelector::Random(RandomTaskSelector::new()),
     ));
@@ -189,7 +193,7 @@ impl SchedulerHandle {
     }
 
     pub fn get_replay(&self) -> ReplayTrace {
-        ReplayTrace::from_trace(&self.0.get_trace())
+        ReplayTrace::from_trace(self.0.string_pool(), &self.0.get_trace())
     }
 
     pub fn new_start_barrier(&self, task_count: usize) -> StartBarrier {

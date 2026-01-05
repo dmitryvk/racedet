@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 use itertools::Itertools;
 
@@ -24,7 +24,7 @@ pub enum TraceItem {
     TaskFinished(TaskRef),
     TaskSuspended {
         task: TaskRef,
-        suspend_point: String,
+        suspend_point: Arc<str>,
     },
     AutoResumedTasks {
         resumed_tasks: BTreeSet<TaskRef>,
@@ -57,14 +57,14 @@ impl FullTraceTaskId {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TaskRef {
     pub id: FullTraceTaskId,
-    pub name: String,
+    pub name: Arc<str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TaskSnapshot {
     pub id: FullTraceTaskId,
-    pub name: String,
-    pub position: Option<String>,
+    pub name: Arc<str>,
+    pub position: Option<Arc<str>>,
 }
 
 impl std::fmt::Display for TraceItem {
