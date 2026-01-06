@@ -6,8 +6,8 @@ use std::{
 use crate::{
     TaskId,
     sync_model::{
-        BadSyncError, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
-        TaskProgressDependencies,
+        BadSyncError, DynSyncModel, NotificationOutcome, ProcessSyncEvent, ProcessSyncInitEvent,
+        SyncEvent, SyncInitEvent, SyncModel, TaskProgressDependencies,
     },
 };
 
@@ -98,6 +98,9 @@ pub struct TaskWaitCompleted;
 impl SyncEvent for NewTaskGroup {
     type Model = TaskWaitModel;
 }
+impl SyncInitEvent for NewTaskGroup {
+    type Model = TaskWaitModel;
+}
 impl SyncEvent for FreeTaskGroup {
     type Model = TaskWaitModel;
 }
@@ -129,6 +132,22 @@ impl ProcessSyncEvent<NewTaskGroup> for TaskWaitModel {
         tracing::debug!(
             "task {task_id:?} registered task group {task_group:?}, new state: {self:?}"
         );
+        Ok(NotificationOutcome::Acknowledged)
+    }
+}
+
+impl ProcessSyncInitEvent<NewTaskGroup> for TaskWaitModel {
+    fn on_init_event(
+        &mut self,
+        NewTaskGroup(task_group): NewTaskGroup,
+    ) -> Result<NotificationOutcome, BadSyncError> {
+        self.task_groups.insert(
+            task_group,
+            TaskGroupState {
+                completed: HashSet::new(),
+            },
+        );
+        tracing::debug!("registered task group {task_group:?}, new state: {self:?}");
         Ok(NotificationOutcome::Acknowledged)
     }
 }

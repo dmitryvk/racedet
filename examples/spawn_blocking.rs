@@ -5,7 +5,7 @@ use conc_checker::{
     capture_panics::capture_panic,
     current_scheduler, execution_point, execution_point_blocking, maybe_with_scheduler_blocking,
     new_scheduler, new_start_barrier, sync_event,
-    sync_model::task_wait::{TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
+    sync_model::task_wait::{NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
     task, task_blocking, with_scheduler, with_start_barrier_blocking, with_task_group_blocking,
 };
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
@@ -53,6 +53,7 @@ async fn bar() {
     // task_join means that the current task is waiting for nested tasks and should not be scheduled in of itself (but other tasks should be scheduled instead)
     let barrier = new_start_barrier(2);
     let task_group = TaskGroup::new();
+    sync_event(NewTaskGroup(task_group));
     let task_a: tokio::task::JoinHandle<_> = spawn_blocking({
         let barrier = barrier.clone();
         let scheduler = current_scheduler();

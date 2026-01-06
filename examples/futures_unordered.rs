@@ -3,9 +3,9 @@ use std::{str::FromStr, time::Duration};
 use conc_checker::{
     ReplayTrace,
     capture_panics::capture_panic,
-    execution_point, new_scheduler, sync_event,
-    sync_model::task_wait::{TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
-    task, with_scheduler, with_task_group,
+    execution_point, new_scheduler, new_start_barrier, sync_event, sync_init_event,
+    sync_model::task_wait::{NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
+    task, with_scheduler, with_start_barrier, with_task_group,
 };
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
@@ -45,16 +45,24 @@ async fn main() {
 
 async fn foo() {
     let task_group = TaskGroup::new();
+    sync_init_event(NewTaskGroup(task_group));
+    let barrier = new_start_barrier(3);
     let futs: FuturesUnordered<_> = (0..3)
-        .map(|i| async move {
-            task(
-                format!("fut {i}"),
-                with_task_group(task_group, i, async {
-                    execution_point("a").await;
-                    i
-                }),
-            )
-            .await
+        .map(|i| {
+            let barrier = barrier.clone();
+            async move {
+                task(
+                    format!("fut {i}"),
+                    with_start_barrier(
+                        barrier,
+                        with_task_group(task_group, i, async {
+                            execution_point("a").await;
+                            i
+                        }),
+                    ),
+                )
+                .await
+            }
         })
         .collect();
     let mut results: Vec<_> = task("main", async {
