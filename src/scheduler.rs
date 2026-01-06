@@ -500,26 +500,6 @@ impl Scheduler {
                 ))
                 .join(", ")
         );
-        {
-            let mut new_tasks = inner
-                        .tasks
-                        .iter_mut()
-                        .filter(|task| matches!(&task.state, TaskState::Suspended { .. } if task.stable_id.is_none()))
-                        .peekable();
-            if new_tasks.peek().is_some() {
-                let mut new_tasks: Vec<&mut Task> = new_tasks.collect();
-                new_tasks.sort_by(|task_1, task_2| {
-                    (self.string_pool.get(task_1.name), task_1.id)
-                        .cmp(&(self.string_pool.get(task_2.name), task_2.id))
-                });
-                for new_task in new_tasks {
-                    let stable_id =
-                        TaskStableId(NonZeroU64::new(inner.next_stable_task_id).unwrap());
-                    inner.next_stable_task_id += 1;
-                    new_task.stable_id = Some(stable_id);
-                }
-            }
-        }
 
         let task_choices = {
             let mut running_tasks = HashSet::new();
@@ -561,6 +541,28 @@ impl Scheduler {
                 tracing::debug!("no ready tasks!");
             }
             NextSchedulerAction::Choices(choices) => {
+                {
+                    // stable IDs should be assigned at the last possible moment, i.e. when we're making a scheduling decision
+                    let mut new_tasks = inner
+                        .tasks
+                        .iter_mut()
+                        .filter(|task| matches!(&task.state, TaskState::Suspended { .. } if task.stable_id.is_none()))
+                        .peekable();
+                    if new_tasks.peek().is_some() {
+                        let mut new_tasks: Vec<&mut Task> = new_tasks.collect();
+                        new_tasks.sort_by(|task_1, task_2| {
+                            (self.string_pool.get(task_1.name), task_1.id)
+                                .cmp(&(self.string_pool.get(task_2.name), task_2.id))
+                        });
+                        for new_task in new_tasks {
+                            let stable_id =
+                                TaskStableId(NonZeroU64::new(inner.next_stable_task_id).unwrap());
+                            inner.next_stable_task_id += 1;
+                            new_task.stable_id = Some(stable_id);
+                        }
+                    }
+                }
+
                 let task_choice = if let Some(replay) = &mut inner.replay {
                     let suspended_tasks = inner
                         .tasks
