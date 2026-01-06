@@ -5,7 +5,7 @@ use conc_checker::{
     capture_panics::capture_panic,
     current_scheduler, execution_point, maybe_with_scheduler, new_scheduler, new_start_barrier,
     sync_event,
-    sync_model::task_wait::{TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
+    sync_model::task_wait::{NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
     task, with_scheduler, with_start_barrier, with_task_group,
 };
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
@@ -53,6 +53,7 @@ async fn bar() {
     // task_join means that the current task is waiting for nested tasks and should not be scheduled in of itself (but other tasks should be scheduled instead)
     let barrier = new_start_barrier(2);
     let task_group = TaskGroup::new();
+    sync_event(NewTaskGroup(task_group));
     let task_a = spawn(maybe_with_scheduler(
         current_scheduler(),
         task(
@@ -83,9 +84,13 @@ async fn bar() {
 async fn baz(n: u32) {
     execution_point("a1").await;
     let task_group = TaskGroup::new();
+    sync_event(NewTaskGroup(task_group));
     let r = spawn(maybe_with_scheduler(
         current_scheduler(),
-        task(format!("spawn baz {n}"), execution_point("q")),
+        task(
+            format!("spawn baz {n}"),
+            with_task_group(task_group, 0, execution_point("q")),
+        ),
     ));
     // TODO: call TaskWaitAnyN before spawn
     // TODO: TaskWaitAnyN introduces non-determinism if a child task is spawned when the current task is "blocked"

@@ -193,6 +193,9 @@ impl Scheduler {
             inner.trace.push(TraceEvent::TaskFinished(task_id));
         }
         drop(guard);
+        tracing::debug!(
+            "scheduler_notify.notify_waiters before (due to task finished {task_id:?})"
+        );
         self.scheduler_notify.notify_waiters();
     }
 
@@ -207,9 +210,10 @@ impl Scheduler {
                 // do nothing
             }
             NotificationOutcome::ScheduleRequired => {
-                tracing::debug!("scheduler_notify.notify_waiters before");
+                tracing::debug!(
+                    "scheduler_notify.notify_waiters before (due to sync event {task_id:?} schedule required)"
+                );
                 self.scheduler_notify.notify_waiters();
-                tracing::debug!("scheduler_notify.notify_waiters done");
             }
         }
 
@@ -226,6 +230,9 @@ impl Scheduler {
                 // do nothing
             }
             NotificationOutcome::ScheduleRequired => {
+                tracing::debug!(
+                    "scheduler_notify.notify_waiters before (due to sync init event schedule required)"
+                );
                 self.scheduler_notify.notify_waiters();
             }
         }
@@ -262,6 +269,9 @@ impl Scheduler {
             task.state = TaskState::Suspended { point: name };
             drop(guard);
         }
+        tracing::debug!(
+            "scheduler_notify.notify_waiters before (due to task {task_id:?} reached point {name})"
+        );
         self.scheduler_notify.notify_waiters();
         loop {
             let mut notified = pin!(self.task_notify.notified());
@@ -298,9 +308,10 @@ impl Scheduler {
                     // do nothing
                 }
                 NotificationOutcome::ScheduleRequired => {
-                    tracing::debug!("scheduler_notify.notify_waiters before");
+                    tracing::debug!(
+                        "scheduler_notify.notify_waiters before (due to task {task_id:?} reaching event ScheduleRequired before point {name})"
+                    );
                     self.scheduler_notify.notify_waiters();
-                    tracing::debug!("scheduler_notify.notify_waiters done");
                 }
             }
 
@@ -326,6 +337,9 @@ impl Scheduler {
             task.state = TaskState::Suspended { point: name };
             drop(guard);
         }
+        tracing::debug!(
+            "scheduler_notify.notify_waiters before (due to task {task_id:?} reaching point {name} with event ScheduleRequired)"
+        );
         self.scheduler_notify.notify_waiters();
         loop {
             let mut notified = pin!(self.task_notify.notified());
@@ -526,6 +540,7 @@ impl Scheduler {
 
             get_eligible_scheduler_choices(&running_tasks, &suspended_tasks, &inner.sync_model)
         };
+        tracing::debug!("scheduler choices: {task_choices:?}");
         match task_choices {
             NextSchedulerAction::NoChoice(tasks) => {
                 if tasks.is_empty() {

@@ -23,12 +23,13 @@ impl TaskGroup {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct TaskWaitModel {
     task_groups: HashMap<TaskGroup, TaskGroupState>,
     task_waits: HashMap<TaskId, TaskWaitCondition>,
 }
 
+#[derive(Debug)]
 struct TaskGroupState {
     completed: HashSet<TaskGroupSlotIdx>,
 }
@@ -36,6 +37,7 @@ struct TaskGroupState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct TaskGroupSlotIdx(usize);
 
+#[derive(Debug)]
 enum TaskWaitCondition {
     AnyN {
         task_group: TaskGroup,
@@ -115,7 +117,7 @@ impl SyncEvent for TaskWaitCompleted {
 impl ProcessSyncEvent<NewTaskGroup> for TaskWaitModel {
     fn on_event(
         &mut self,
-        _task_id: TaskId,
+        task_id: TaskId,
         NewTaskGroup(task_group): NewTaskGroup,
     ) -> Result<NotificationOutcome, BadSyncError> {
         self.task_groups.insert(
@@ -124,6 +126,9 @@ impl ProcessSyncEvent<NewTaskGroup> for TaskWaitModel {
                 completed: HashSet::new(),
             },
         );
+        tracing::debug!(
+            "task {task_id:?} registered task group {task_group:?}, new state: {self:?}"
+        );
         Ok(NotificationOutcome::Acknowledged)
     }
 }
@@ -131,10 +136,11 @@ impl ProcessSyncEvent<NewTaskGroup> for TaskWaitModel {
 impl ProcessSyncEvent<FreeTaskGroup> for TaskWaitModel {
     fn on_event(
         &mut self,
-        _task_id: TaskId,
+        task_id: TaskId,
         FreeTaskGroup(task_group): FreeTaskGroup,
     ) -> Result<NotificationOutcome, BadSyncError> {
         self.task_groups.remove(&task_group);
+        tracing::debug!("task {task_id:?} removed task group {task_group:?}, new state: {self:?}");
         Ok(NotificationOutcome::Acknowledged)
     }
 }
@@ -142,12 +148,15 @@ impl ProcessSyncEvent<FreeTaskGroup> for TaskWaitModel {
 impl ProcessSyncEvent<TaskCompleted> for TaskWaitModel {
     fn on_event(
         &mut self,
-        _task_id: TaskId,
+        task_id: TaskId,
         TaskCompleted(task_group, slot_idx): TaskCompleted,
     ) -> Result<NotificationOutcome, BadSyncError> {
         if let Some(task_group) = self.task_groups.get_mut(&task_group) {
             task_group.completed.insert(TaskGroupSlotIdx(slot_idx));
         }
+        tracing::debug!(
+            "task {task_id:?} completed {task_group:?} {slot_idx}, new state: {self:?}"
+        );
         Ok(NotificationOutcome::Acknowledged)
     }
 }
@@ -164,6 +173,9 @@ impl ProcessSyncEvent<TaskWaitAnyN> for TaskWaitModel {
                 task_group,
                 num_tasks,
             },
+        );
+        tracing::debug!(
+            "task wait AnyN({task_group:?}, {num_tasks}) registered for {task_id:?}, new state: {self:?}"
         );
         Ok(NotificationOutcome::ScheduleRequired)
     }
@@ -182,6 +194,9 @@ impl ProcessSyncEvent<TaskWaitNth> for TaskWaitModel {
                 slot: TaskGroupSlotIdx(slot_idx),
             },
         );
+        tracing::debug!(
+            "task wait Nth({task_group:?}, {slot_idx}) registered for {task_id:?}, new state: {self:?}"
+        );
         Ok(NotificationOutcome::ScheduleRequired)
     }
 }
@@ -193,6 +208,7 @@ impl ProcessSyncEvent<TaskWaitCompleted> for TaskWaitModel {
         _: TaskWaitCompleted,
     ) -> Result<NotificationOutcome, BadSyncError> {
         self.task_waits.remove(&task_id);
+        tracing::debug!("task wait completed for {task_id:?}, new state: {self:?}");
         Ok(NotificationOutcome::Acknowledged)
     }
 }
