@@ -173,7 +173,9 @@ impl Scheduler {
             prev_suspend_point: None,
             state: TaskState::Running,
         });
-        inner.trace.push(TraceEvent::TaskStarted(id));
+        if inner.error.is_none() {
+            inner.trace.push(TraceEvent::TaskStarted(id));
+        }
         id
     }
 
@@ -187,7 +189,9 @@ impl Scheduler {
         let inner = &mut *guard;
         let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
         task.state = TaskState::Finished;
-        inner.trace.push(TraceEvent::TaskFinished(task_id));
+        if inner.error.is_none() {
+            inner.trace.push(TraceEvent::TaskFinished(task_id));
+        }
         drop(guard);
         self.scheduler_notify.notify_waiters();
     }
@@ -239,10 +243,12 @@ impl Scheduler {
             let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
             match &task.state {
                 TaskState::Running => {
-                    inner.trace.push(TraceEvent::TaskSuspended {
-                        task: task_id,
-                        suspend_point: name,
-                    });
+                    if inner.error.is_none() {
+                        inner.trace.push(TraceEvent::TaskSuspended {
+                            task: task_id,
+                            suspend_point: name,
+                        });
+                    }
                 }
                 TaskState::Suspended { .. } | TaskState::Finished => {
                     panic!(
@@ -301,10 +307,12 @@ impl Scheduler {
             let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
             match &task.state {
                 TaskState::Running => {
-                    inner.trace.push(TraceEvent::TaskSuspended {
-                        task: task_id,
-                        suspend_point: name,
-                    });
+                    if inner.error.is_none() {
+                        inner.trace.push(TraceEvent::TaskSuspended {
+                            task: task_id,
+                            suspend_point: name,
+                        });
+                    }
                 }
                 TaskState::Suspended { .. } | TaskState::Finished => {
                     panic!(
@@ -524,11 +532,13 @@ impl Scheduler {
                     tracing::debug!("no ready tasks!");
                 } else {
                     let (running_tasks, suspended_tasks) = Self::trace_task_snapshots(inner);
-                    inner.trace.push(TraceEvent::AutoResumedTasks {
-                        resumed_tasks: tasks.iter().copied().collect(),
-                        running_tasks,
-                        suspended_tasks,
-                    });
+                    if inner.error.is_none() {
+                        inner.trace.push(TraceEvent::AutoResumedTasks {
+                            resumed_tasks: tasks.iter().copied().collect(),
+                            running_tasks,
+                            suspended_tasks,
+                        });
+                    }
                     self.resume_tasks(inner, &tasks);
                 }
             }
@@ -605,15 +615,17 @@ impl Scheduler {
                     choices.len()
                 );
                 let (running_tasks, suspended_tasks) = Self::trace_task_snapshots(inner);
-                inner.trace.push(TraceEvent::ScheduleDecision {
-                    resumed_tasks: task_choice.to_run.iter().copied().collect(),
-                    running_tasks,
-                    suspended_tasks,
-                    options: choices
-                        .iter()
-                        .map(|choice| choice.to_run.iter().copied().collect())
-                        .collect(),
-                });
+                if inner.error.is_none() {
+                    inner.trace.push(TraceEvent::ScheduleDecision {
+                        resumed_tasks: task_choice.to_run.iter().copied().collect(),
+                        running_tasks,
+                        suspended_tasks,
+                        options: choices
+                            .iter()
+                            .map(|choice| choice.to_run.iter().copied().collect())
+                            .collect(),
+                    });
+                }
 
                 self.resume_tasks(inner, &task_choice.to_run);
             }
