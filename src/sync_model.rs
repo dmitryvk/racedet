@@ -134,6 +134,7 @@ pub enum TaskProgressDependencies {
     /// - tokio::join/BufferedUnordered/tokio::spawn
     /// - barrier with insufficient waiters
     // TODO: include the blocking tasks for deadlock detection
+    // TODO: include reasons for debugging
     Blocked,
 }
 
