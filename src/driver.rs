@@ -22,6 +22,7 @@ enum RunMode {
 }
 
 impl Driver {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             mode: RunMode::Random,
