@@ -14,6 +14,7 @@ use tokio::join;
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
+
     let replay = std::env::var("CONC_CHECKER_REPLAY")
         .ok()
         .map(|s| ReplayTrace::from_str(&s).unwrap());
@@ -30,12 +31,7 @@ async fn main() {
             println!("ok {res:?}");
         }
         Ok(Err(panic)) => {
-            println!(
-                "panic at {location}:\n{message}\n{backtrace}",
-                message = panic.message,
-                location = panic.location,
-                backtrace = panic.backtrace,
-            );
+            println!("test panicked: {message}", message = panic.message);
         }
         Err(timeout) => {
             println!("timeout {}", timeout.active_traces[0].stack_trace());

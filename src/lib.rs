@@ -11,6 +11,7 @@ use crate::{
     sync_model::{SyncEvent, SyncInitEvent},
 };
 pub mod capture_panics;
+pub mod driver;
 mod executor;
 pub mod full_trace;
 mod replay_trace;

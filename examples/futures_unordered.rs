@@ -1,46 +1,25 @@
-use std::{str::FromStr, time::Duration};
+use std::time::Duration;
 
 use conc_checker::{
-    ReplayTrace,
-    capture_panics::capture_panic,
-    execution_point, new_scheduler, new_start_barrier, sync_event, sync_init_event,
+    driver::Driver,
+    execution_point, new_start_barrier, sync_event, sync_init_event,
     sync_model::task_wait::{NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
-    task, with_scheduler, with_start_barrier, with_task_group,
+    task, with_start_barrier, with_task_group,
 };
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
-use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    let replay = std::env::var("CONC_CHECKER_REPLAY")
-        .ok()
-        .map(|s| ReplayTrace::from_str(&s).unwrap());
-    let (scheduler, control_fut) = new_scheduler(replay.as_ref());
-    tokio::spawn(control_fut);
-    let res = timeout(
-        Duration::from_secs(10),
-        CaptureSpanAndStackTrace,
-        with_scheduler(scheduler.clone(), capture_panic(foo())),
-    )
-    .await;
-    match res {
-        Ok(Ok(res)) => {
-            println!("ok {res:?}");
-        }
-        Ok(Err(panic)) => {
-            println!(
-                "panic {} at {}\n{}",
-                panic.message, panic.location, panic.backtrace
-            );
-        }
-        Err(timeout) => {
-            println!("timeout {}", timeout.active_traces[0].stack_trace());
-        }
-    }
-    println!("{}", scheduler.get_trace());
-    println!("CONC_CHECKER_REPLAY=\"{}\"", scheduler.get_replay());
+
+    Driver::new()
+        .with_replay_many_env_var("RACE_DET_REPLAY")
+        .max_iterations_env_var("RACE_DET_ITERS", None)
+        .max_total_duration_env_var("RACE_DET_DURATION_SEC", Duration::from_secs(10))
+        .test_timeout(Duration::from_secs(1))
+        .run_async(async || foo().await)
+        .await;
 }
 
 async fn foo() {

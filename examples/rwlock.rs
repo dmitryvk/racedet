@@ -1,47 +1,26 @@
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use conc_checker::capture_panics::capture_panic;
+use conc_checker::driver::Driver;
+use conc_checker::sync_event;
 use conc_checker::sync_model::rwlock::{
     LockedRwlock, LockingRwlock, ReleasedRwlock, RwlockId, RwlockMode,
 };
-use conc_checker::{ReplayTrace, execution_point, new_start_barrier, task, with_start_barrier};
-use conc_checker::{new_scheduler, sync_event, with_scheduler};
-use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
+use conc_checker::{execution_point, new_start_barrier, task, with_start_barrier};
 use tokio::join;
 use tokio::sync::RwLock;
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    let replay = std::env::var("CONC_CHECKER_REPLAY")
-        .ok()
-        .map(|s| ReplayTrace::from_str(&s).unwrap());
-    let (scheduler, control_fut) = new_scheduler(replay.as_ref());
-    tokio::spawn(control_fut);
-    let res = timeout(
-        Duration::from_secs(10),
-        CaptureSpanAndStackTrace,
-        with_scheduler(scheduler.clone(), capture_panic(foo())),
-    )
-    .await;
-    match res {
-        Ok(Ok(res)) => {
-            println!("ok {res:?}");
-        }
-        Ok(Err(panic)) => {
-            println!(
-                "panic {} at {}\n{}",
-                panic.message, panic.location, panic.backtrace
-            );
-        }
-        Err(timeout) => {
-            println!("timeout {}", timeout.active_traces[0].stack_trace());
-        }
-    }
-    println!("{}", scheduler.get_trace());
-    println!("CONC_CHECKER_REPLAY=\"{}\"", scheduler.get_replay());
+
+    Driver::new()
+        .with_replay_many_env_var("RACE_DET_REPLAY")
+        .max_iterations_env_var("RACE_DET_ITERS", None)
+        .max_total_duration_env_var("RACE_DET_DURATION_SEC", Duration::from_secs(10))
+        .test_timeout(Duration::from_secs(1))
+        .run_async(async || foo().await)
+        .await;
 }
 
 async fn foo() {

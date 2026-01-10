@@ -1,42 +1,19 @@
-use std::{str::FromStr, time::Duration};
+use std::time::Duration;
 
-use conc_checker::{
-    ReplayTrace, capture_panics::capture_panic, execution_point, new_scheduler, task,
-    with_scheduler,
-};
-use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
+use conc_checker::{driver::Driver, execution_point, task};
 use tokio::join;
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    let replay = std::env::var("CONC_CHECKER_REPLAY")
-        .ok()
-        .map(|s| ReplayTrace::from_str(&s).unwrap());
-    let (scheduler, control_fut) = new_scheduler(replay.as_ref());
-    tokio::spawn(control_fut);
-    let res = timeout(
-        Duration::from_secs(10),
-        CaptureSpanAndStackTrace,
-        with_scheduler(scheduler.clone(), capture_panic(foo())),
-    )
-    .await;
-    match res {
-        Ok(Ok(res)) => {
-            println!("ok {res:?}");
-        }
-        Ok(Err(panic)) => {
-            println!(
-                "panic {} at {}\n{}",
-                panic.message, panic.location, panic.backtrace
-            );
-        }
-        Err(timeout) => {
-            println!("timeout {}", timeout.active_traces[0].stack_trace());
-        }
-    }
-    println!("{}", scheduler.get_trace());
-    println!("CONC_CHECKER_REPLAY=\"{}\"", scheduler.get_replay());
+
+    Driver::new()
+        .with_replay_many_env_var("RACE_DET_REPLAY")
+        .max_iterations_env_var("RACE_DET_ITERS", None)
+        .max_total_duration_env_var("RACE_DET_DURATION_SEC", Duration::from_secs(10))
+        .test_timeout(Duration::from_secs(1))
+        .run_async(async || foo().await)
+        .await;
 }
 
 async fn foo() {
@@ -45,5 +22,8 @@ async fn foo() {
 
 async fn bar() {
     execution_point("before").await;
+    // This fails with a message:
+    // task 1 1 reached point 4, but its state is not Running, but rather is Suspended { point: StringIdx(3) }.
+    // This might mean that an internal task concurrency is happening (e.g., join or FuturesUnordered).
     join!(execution_point("a"), execution_point("b"));
 }

@@ -5,8 +5,6 @@ use pin_project::pin_project;
 #[derive(Debug, Clone)]
 pub struct CapturedPanic {
     pub message: String,
-    pub location: String,
-    pub backtrace: String,
 }
 
 /// Captures panics during async execution of `inner` and (asynchronously) returns `Result<T, CapturedPanic>`
@@ -41,11 +39,7 @@ impl<Fut: Future> Future for CapturePanicFut<Fut> {
                 } else {
                     "unknown panic".to_string()
                 };
-                let info = CapturedPanic {
-                    message: msg,
-                    location: "".to_string(),
-                    backtrace: "".to_string(),
-                };
+                let info = CapturedPanic { message: msg };
                 Poll::Ready(Err(info))
             }
         }
