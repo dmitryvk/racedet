@@ -20,7 +20,7 @@ mod scheduler;
 mod string_pool;
 pub mod sync_model;
 
-pub use replay_trace_parsed::{ParseError, ReplayTrace};
+pub use replay_trace_parsed::{ParseError as ReplayTraceParseError, ReplayTrace};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TaskId(NonZeroU64);
@@ -234,19 +234,6 @@ pub fn maybe_with_scheduler_blocking<T>(
         _guard = scheduler.0.set_current();
     }
     inner()
-}
-
-#[derive(Debug, Clone)]
-pub enum RunResult<T> {
-    Ok(T),
-    Panic(PanicInfo),
-}
-
-#[derive(Debug, Clone)]
-pub struct PanicInfo {
-    pub message: String,
-    pub location: String,
-    pub backtrace: String,
 }
 
 pin_project! {
