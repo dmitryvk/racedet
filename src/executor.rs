@@ -1,6 +1,6 @@
 use std::{cell::RefCell, task::Poll};
 
-use pin_project::pin_project;
+use pin_project_lite::pin_project;
 
 use crate::TaskId;
 
@@ -8,11 +8,12 @@ thread_local! {
     static CURRENT_TASK: RefCell<Option<TaskId>> = const { RefCell::new(None) };
 }
 
-#[pin_project]
-pub(crate) struct TaskFuture<Fut> {
-    #[pin]
-    inner: Fut,
-    task_id: Option<TaskId>,
+pin_project! {
+    pub(crate) struct TaskFuture<Fut> {
+        #[pin]
+        inner: Fut,
+        task_id: Option<TaskId>,
+    }
 }
 
 impl<Fut> TaskFuture<Fut> {

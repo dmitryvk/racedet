@@ -1,6 +1,6 @@
 use std::{panic::AssertUnwindSafe, task::Poll};
 
-use pin_project::pin_project;
+use pin_project_lite::pin_project;
 
 #[derive(Debug, Clone)]
 pub struct CapturedPanic {
@@ -15,10 +15,11 @@ where
     CapturePanicFut { inner }
 }
 
-#[pin_project]
-pub struct CapturePanicFut<Fut> {
-    #[pin]
-    inner: Fut,
+pin_project! {
+    pub struct CapturePanicFut<Fut> {
+        #[pin]
+        inner: Fut,
+    }
 }
 
 impl<Fut: Future> Future for CapturePanicFut<Fut> {

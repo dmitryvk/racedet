@@ -1,7 +1,7 @@
 use std::{num::NonZeroU64, sync::Arc, task::Poll};
 
 use futures_executor::block_on;
-use pin_project::pin_project;
+use pin_project_lite::pin_project;
 use tokio::sync::Barrier;
 
 use crate::{
@@ -249,11 +249,12 @@ pub struct PanicInfo {
     pub backtrace: String,
 }
 
-#[pin_project]
-pub struct WithScheduler<Fut> {
-    scheduler: Option<Arc<Scheduler>>,
-    #[pin]
-    inner: Fut,
+pin_project! {
+    pub struct WithScheduler<Fut> {
+        scheduler: Option<Arc<Scheduler>>,
+        #[pin]
+        inner: Fut,
+    }
 }
 
 impl<Fut: Future> Future for WithScheduler<Fut> {
