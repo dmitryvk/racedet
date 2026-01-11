@@ -10,7 +10,7 @@ use crate::{
     scheduler::{RandomTaskSelector, Scheduler},
     sync_model::{SyncEvent, SyncInitEvent},
 };
-pub mod capture_panics;
+mod capture_panics;
 pub mod driver;
 mod executor;
 pub mod full_trace;
@@ -26,7 +26,7 @@ pub use replay_trace_parsed::{ParseError, ReplayTrace};
 pub struct TaskId(NonZeroU64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TaskStableId(NonZeroU64);
+struct TaskStableId(NonZeroU64);
 
 pub fn sync_event<T: SyncEvent>(event: T) {
     if let Some(scheduler) = Scheduler::current()

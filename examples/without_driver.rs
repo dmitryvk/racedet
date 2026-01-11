@@ -1,12 +1,14 @@
 use std::{
+    panic::AssertUnwindSafe,
     str::FromStr,
     sync::{Arc, atomic::AtomicI64},
     time::Duration,
 };
 
+use futures::FutureExt;
 use racedet::{
-    ReplayTrace, capture_panics::capture_panic, execution_point, new_scheduler, new_start_barrier,
-    task, with_scheduler, with_start_barrier,
+    ReplayTrace, execution_point, new_scheduler, new_start_barrier, task, with_scheduler,
+    with_start_barrier,
 };
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
 use tokio::join;
@@ -23,7 +25,7 @@ async fn main() {
     let res = timeout(
         Duration::from_secs(10),
         CaptureSpanAndStackTrace,
-        with_scheduler(scheduler.clone(), capture_panic(foo())),
+        with_scheduler(scheduler.clone(), AssertUnwindSafe(foo()).catch_unwind()),
     )
     .await;
     match res {
@@ -31,7 +33,13 @@ async fn main() {
             println!("ok {res:?}");
         }
         Ok(Err(panic)) => {
-            println!("test panicked: {message}", message = panic.message);
+            println!(
+                "test panicked: {message}",
+                message = panic
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .unwrap_or("(non-String payload)")
+            );
         }
         Err(timeout) => {
             println!("timeout {}", timeout.active_traces[0].stack_trace());

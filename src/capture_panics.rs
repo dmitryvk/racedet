@@ -1,48 +1,31 @@
-use std::{panic::AssertUnwindSafe, task::Poll};
+use std::{any::Any, panic::AssertUnwindSafe};
 
-use pin_project_lite::pin_project;
+use futures_util::FutureExt;
 
 #[derive(Debug, Clone)]
-pub struct CapturedPanic {
-    pub message: String,
+pub(crate) struct CapturedPanic {
+    pub(crate) message: String,
 }
 
 /// Captures panics during async execution of `inner` and (asynchronously) returns `Result<T, CapturedPanic>`
-pub fn capture_panic<T, Fut>(inner: Fut) -> CapturePanicFut<Fut>
+pub(crate) async fn capture_panic<T, Fut>(inner: Fut) -> Result<Fut::Output, CapturedPanic>
 where
     Fut: Future<Output = T>,
 {
-    CapturePanicFut { inner }
+    AssertUnwindSafe(inner)
+        .catch_unwind()
+        .await
+        .map_err(CapturedPanic::from_panic_payload)
 }
 
-pin_project! {
-    pub struct CapturePanicFut<Fut> {
-        #[pin]
-        inner: Fut,
-    }
-}
-
-impl<Fut: Future> Future for CapturePanicFut<Fut> {
-    type Output = Result<Fut::Output, CapturedPanic>;
-
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        let this = self.project();
-        let res = std::panic::catch_unwind(AssertUnwindSafe(|| this.inner.poll(cx)));
-        match res {
-            Ok(Poll::Pending) => Poll::Pending,
-            Ok(Poll::Ready(res)) => Poll::Ready(Ok(res)),
-            Err(panic) => {
-                let msg = if let Some(s) = panic.downcast_ref::<String>() {
-                    s.clone()
-                } else {
-                    "unknown panic".to_string()
-                };
-                let info = CapturedPanic { message: msg };
-                Poll::Ready(Err(info))
-            }
+impl CapturedPanic {
+    fn from_panic_payload(panic: Box<dyn Any + Send + 'static>) -> Self {
+        CapturedPanic {
+            message: if let Ok(s) = panic.downcast::<String>() {
+                *s
+            } else {
+                "(non-string panic payload)".to_owned()
+            },
         }
     }
 }

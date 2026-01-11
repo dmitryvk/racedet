@@ -6,7 +6,7 @@ use crate::{TaskId, TaskStableId};
 
 #[derive(Debug, Clone)]
 pub struct Trace {
-    pub trace: Vec<TraceItem>,
+    pub(crate) trace: Vec<TraceItem>,
 }
 
 impl std::fmt::Display for Trace {
@@ -19,7 +19,7 @@ impl std::fmt::Display for Trace {
 }
 
 #[derive(Debug, Clone)]
-pub enum TraceItem {
+pub(crate) enum TraceItem {
     TaskStarted(TaskRef),
     TaskFinished(TaskRef),
     TaskSuspended {
@@ -40,7 +40,7 @@ pub enum TraceItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum FullTraceTaskId {
+pub(crate) enum FullTraceTaskId {
     Stable(TaskStableId),
     Unstable(TaskId),
 }
@@ -55,16 +55,16 @@ impl FullTraceTaskId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TaskRef {
-    pub id: FullTraceTaskId,
-    pub name: Arc<str>,
+pub(crate) struct TaskRef {
+    pub(crate) id: FullTraceTaskId,
+    pub(crate) name: Arc<str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TaskSnapshot {
-    pub id: FullTraceTaskId,
-    pub name: Arc<str>,
-    pub position: Option<Arc<str>>,
+pub(crate) struct TaskSnapshot {
+    pub(crate) id: FullTraceTaskId,
+    pub(crate) name: Arc<str>,
+    pub(crate) position: Option<Arc<str>>,
 }
 
 impl std::fmt::Display for TraceItem {
