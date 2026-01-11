@@ -188,7 +188,8 @@ impl ReplayTrace {
             actual.sort();
             tracing::error!("replay diverged: expected {expected:?}, got {actual:?}");
             Err(format!(
-                "replay diverged: suspended tasks don't match: expected {expected:?}, got {actual:?}"
+                "replay diverged: suspended tasks don't match: expected {expected:?}, got \
+                 {actual:?}"
             ))
         } else {
             Ok(&step.resumed_tasks)

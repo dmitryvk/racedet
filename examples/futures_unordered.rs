@@ -1,13 +1,12 @@
 use std::time::Duration;
 
-use conc_checker::{
+use futures::{StreamExt, stream::FuturesUnordered};
+use racedet::{
     driver::Driver,
     execution_point, new_start_barrier, sync_event, sync_init_event,
     sync_model::task_wait::{NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
     task, with_start_barrier, with_task_group,
 };
-use futures::StreamExt;
-use futures::stream::FuturesUnordered;
 
 #[tokio::main]
 async fn main() {

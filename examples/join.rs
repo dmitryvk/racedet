@@ -1,13 +1,12 @@
-use std::time::Duration;
+use std::{pin::pin, time::Duration};
 
-use conc_checker::driver::Driver;
-use conc_checker::sync_event;
-use conc_checker::sync_model::task_wait::{
-    NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted,
+use futures::{FutureExt, select};
+use racedet::{
+    driver::Driver,
+    execution_point, new_start_barrier, sync_event,
+    sync_model::task_wait::{NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
+    task, with_start_barrier, with_task_group,
 };
-use conc_checker::{execution_point, new_start_barrier, task, with_start_barrier, with_task_group};
-use futures::FutureExt;
-use futures::select;
 use tokio::{join, time::sleep};
 
 #[tokio::main]
@@ -30,7 +29,8 @@ async fn foo() {
 async fn bar() {
     execution_point("spawn tasks").await;
 
-    // task_join means that the current task is waiting for nested tasks and should not be scheduled in of itself (but other tasks should be scheduled instead)
+    // task_join means that the current task is waiting for nested tasks
+    // and should not be scheduled in of itself (but other tasks should be scheduled instead)
     let barrier = new_start_barrier(2);
     let task_group = TaskGroup::new();
     sync_event(NewTaskGroup(task_group));
@@ -66,9 +66,31 @@ async fn bar() {
     tracing::debug!("sync_event starting select");
     sync_event(TaskWaitAnyN(task_group, 1));
     tracing::debug!("starting select");
+    let mut task_c = pin!(
+        task(
+            "c",
+            with_task_group(
+                task_group,
+                0,
+                with_start_barrier(barrier.clone(), execution_point("c")),
+            ),
+        )
+        .fuse()
+    );
+    let mut task_d = pin!(
+        task(
+            "d",
+            with_task_group(
+                task_group,
+                1,
+                with_start_barrier(barrier.clone(), execution_point("d")),
+            ),
+        )
+        .fuse()
+    );
     select! {
-        _ = task("c", with_task_group(task_group, 0, with_start_barrier(barrier.clone(), execution_point("c")))).fuse() => {},
-        _ = task("d", with_task_group(task_group, 1, with_start_barrier(barrier.clone(), execution_point("d")))).fuse() => {},
+        _ = task_c => {},
+        _ = task_d => {},
         _ = sleep(Duration::from_millis(1000)).fuse() => {}
     }
     tracing::debug!("done select");

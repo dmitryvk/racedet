@@ -34,9 +34,14 @@ impl Driver {
     }
 
     pub fn with_replay_once_env_var(mut self, env_var_name: &str) -> Self {
-        let replay = std::env::var(env_var_name)
-            .ok()
-            .map(|s| ReplayTrace::from_str(&s).unwrap_or_else(|err| panic!("unable to parse trace for replay from the \"{env_var_name}\" environment variable: {err}")));
+        let replay = std::env::var(env_var_name).ok().map(|s| {
+            ReplayTrace::from_str(&s).unwrap_or_else(|err| {
+                panic!(
+                    "unable to parse trace for replay from the \"{env_var_name}\" environment \
+                     variable: {err}"
+                )
+            })
+        });
         self.mode = if let Some(replay) = replay {
             RunMode::ReplayOnce(replay)
         } else {
@@ -47,9 +52,14 @@ impl Driver {
     }
 
     pub fn with_replay_many_env_var(mut self, env_var_name: &str) -> Self {
-        let replay = std::env::var(env_var_name)
-            .ok()
-            .map(|s| ReplayTrace::from_str(&s).unwrap_or_else(|err| panic!("unable to parse trace for replay from the \"{env_var_name}\" environment variable: {err}")));
+        let replay = std::env::var(env_var_name).ok().map(|s| {
+            ReplayTrace::from_str(&s).unwrap_or_else(|err| {
+                panic!(
+                    "unable to parse trace for replay from the \"{env_var_name}\" environment \
+                     variable: {err}"
+                )
+            })
+        });
         self.mode = if let Some(replay) = replay {
             RunMode::ReplayMany(replay)
         } else {
@@ -71,7 +81,14 @@ impl Driver {
     ) -> Self {
         let num_iterations = std::env::var(env_var_name)
             .ok()
-            .map(|s| u32::from_str(&s).unwrap_or_else(|err| panic!("unable to parse max number of iterations from the \"{env_var_name}\" environment variable: {err}")))
+            .map(|s| {
+                u32::from_str(&s).unwrap_or_else(|err| {
+                    panic!(
+                        "unable to parse max number of iterations from the \"{env_var_name}\" \
+                         environment variable: {err}"
+                    )
+                })
+            })
             .or(default_num_iterations);
         self.max_iterations = num_iterations;
         self
@@ -89,7 +106,14 @@ impl Driver {
     ) -> Self {
         let duration = std::env::var(env_var_name)
             .ok()
-            .map(|s| f64::from_str(&s).unwrap_or_else(|err| panic!("unable to parse max number of iterations from the \"{env_var_name}\" environment variable: {err}")))
+            .map(|s| {
+                f64::from_str(&s).unwrap_or_else(|err| {
+                    panic!(
+                        "unable to parse max number of iterations from the \"{env_var_name}\" \
+                         environment variable: {err}"
+                    )
+                })
+            })
             .map(Duration::from_secs_f64)
             .unwrap_or(default_duration);
         self.max_total_duration = duration;
@@ -170,21 +194,24 @@ impl Driver {
         {
             let replay_message = if let Some(env_var) = &self.replay_env_var_name {
                 format!(
-                    "To replay this test, set the following environment variable:\n{env_var}=\"{}\"\n",
+                    "To replay this test, set the following environment \
+                     variable:\n{env_var}=\"{}\"\n",
                     scheduler.get_replay()
                 )
             } else {
                 "".to_owned()
             };
             panic!(
-                "Internal error in test scheduler: {join_error}.\n{replay_message}Execution trace:\n{}",
+                "Internal error in test scheduler: {join_error}.\n{replay_message}Execution \
+                 trace:\n{}",
                 scheduler.get_trace()
             );
         }
         if let Err(message) = test_res {
             let replay_message = if let Some(env_var) = &self.replay_env_var_name {
                 format!(
-                    "To replay this test, set the following environment variable:\n{env_var}=\"{}\"\n",
+                    "To replay this test, set the following environment \
+                     variable:\n{env_var}=\"{}\"\n",
                     scheduler.get_replay()
                 )
             } else {

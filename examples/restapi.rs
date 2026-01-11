@@ -10,12 +10,12 @@ use axum::{
     response::Response,
     routing::{get, post},
 };
-use conc_checker::{
+use futures::{FutureExt, future::BoxFuture};
+use hyper::StatusCode;
+use racedet::{
     ReplayTrace, SchedulerHandle, StartBarrier, execution_point, new_scheduler, task,
     with_start_barrier,
 };
-use futures::{FutureExt, future::BoxFuture};
-use hyper::StatusCode;
 use serde::{Deserialize, Serialize};
 use tokio::select;
 use tokio_util::sync::CancellationToken;
@@ -205,7 +205,7 @@ where
                 header.concurrent_task_count,
                 replay,
             );
-            conc_checker::with_scheduler(
+            racedet::with_scheduler(
                 scheduler,
                 task(
                     header.task_id,

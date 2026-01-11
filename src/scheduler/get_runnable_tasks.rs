@@ -100,11 +100,10 @@ mod tests {
 
     use itertools::Itertools;
 
+    use super::*;
     use crate::sync_model::{
         BadSyncError, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
     };
-
-    use super::*;
 
     #[test]
     fn ready_running() {

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use conc_checker::{driver::Driver, execution_point, task};
+use racedet::{driver::Driver, execution_point, task};
 use tokio::join;
 
 #[tokio::main]

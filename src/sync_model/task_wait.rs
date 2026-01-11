@@ -194,7 +194,8 @@ impl ProcessSyncEvent<TaskWaitAnyN> for TaskWaitModel {
             },
         );
         tracing::debug!(
-            "task wait AnyN({task_group:?}, {num_tasks}) registered for {task_id:?}, new state: {self:?}"
+            "task wait AnyN({task_group:?}, {num_tasks}) registered for {task_id:?}, new state: \
+             {self:?}"
         );
         Ok(NotificationOutcome::ScheduleRequired)
     }
@@ -214,7 +215,8 @@ impl ProcessSyncEvent<TaskWaitNth> for TaskWaitModel {
             },
         );
         tracing::debug!(
-            "task wait Nth({task_group:?}, {slot_idx}) registered for {task_id:?}, new state: {self:?}"
+            "task wait Nth({task_group:?}, {slot_idx}) registered for {task_id:?}, new state: \
+             {self:?}"
         );
         Ok(NotificationOutcome::ScheduleRequired)
     }

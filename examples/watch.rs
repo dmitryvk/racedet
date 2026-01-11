@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use conc_checker::{
+use racedet::{
     driver::Driver,
     execution_point, new_start_barrier, sync_event,
     sync_model::watch::{WaitingForWatchUpdate, WatchId, WatchNotified},

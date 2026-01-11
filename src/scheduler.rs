@@ -211,7 +211,8 @@ impl Scheduler {
             }
             NotificationOutcome::ScheduleRequired => {
                 tracing::debug!(
-                    "scheduler_notify.notify_waiters before (due to sync event {task_id:?} schedule required)"
+                    "scheduler_notify.notify_waiters before (due to sync event {task_id:?} \
+                     schedule required)"
                 );
                 self.scheduler_notify.notify_waiters();
             }
@@ -231,7 +232,8 @@ impl Scheduler {
             }
             NotificationOutcome::ScheduleRequired => {
                 tracing::debug!(
-                    "scheduler_notify.notify_waiters before (due to sync init event schedule required)"
+                    "scheduler_notify.notify_waiters before (due to sync init event schedule \
+                     required)"
                 );
                 self.scheduler_notify.notify_waiters();
             }
@@ -259,11 +261,12 @@ impl Scheduler {
                 }
                 TaskState::Suspended { .. } | TaskState::Finished => {
                     panic!(
-"task {} {} reached point {name}, but its state is not Running, but rather is {:?}.
+                        "task {} {} reached point {name}, but its state is not Running, but \
+                         rather is {:?}.
   This might mean that an internal task concurrency is happening (e.g., join or FuturesUnordered).
   If this is the case, each spawned task must be wrapped with `task`",
-                    task.id.0, task.name, task.state
-                );
+                        task.id.0, task.name, task.state
+                    );
                 }
             }
             task.state = TaskState::Suspended { point: name };
@@ -309,7 +312,8 @@ impl Scheduler {
                 }
                 NotificationOutcome::ScheduleRequired => {
                     tracing::debug!(
-                        "scheduler_notify.notify_waiters before (due to task {task_id:?} reaching event ScheduleRequired before point {name})"
+                        "scheduler_notify.notify_waiters before (due to task {task_id:?} reaching \
+                         event ScheduleRequired before point {name})"
                     );
                     self.scheduler_notify.notify_waiters();
                 }
@@ -327,18 +331,20 @@ impl Scheduler {
                 }
                 TaskState::Suspended { .. } | TaskState::Finished => {
                     panic!(
-"task {} {} reached point {name}, but its state is not Running, but rather is {:?}.
+                        "task {} {} reached point {name}, but its state is not Running, but \
+                         rather is {:?}.
   This might mean that an internal task concurrency is happening (e.g., join or FuturesUnordered).
   If this is the case, each spawned task must be wrapped with `task`",
-                    task.id.0, task.name, task.state
-                );
+                        task.id.0, task.name, task.state
+                    );
                 }
             }
             task.state = TaskState::Suspended { point: name };
             drop(guard);
         }
         tracing::debug!(
-            "scheduler_notify.notify_waiters before (due to task {task_id:?} reaching point {name} with event ScheduleRequired)"
+            "scheduler_notify.notify_waiters before (due to task {task_id:?} reaching point \
+             {name} with event ScheduleRequired)"
         );
         self.scheduler_notify.notify_waiters();
         loop {
@@ -609,11 +615,13 @@ impl Scheduler {
                                 == HashSet::from_iter(resumed_tasks.iter().copied())
                     }) else {
                         tracing::error!(
-                            "task execution has diverged at step {}: did not find resumed_tasks {resumed_tasks:?} among possible choices {choices:?}",
+                            "task execution has diverged at step {}: did not find resumed_tasks \
+                             {resumed_tasks:?} among possible choices {choices:?}",
                             replay.next_step
                         );
                         let msg = format!(
-                            "task execution has diverged at step {}: did not find resumed_tasks {resumed_tasks:?} among possible choices {choices:?}",
+                            "task execution has diverged at step {}: did not find resumed_tasks \
+                             {resumed_tasks:?} among possible choices {choices:?}",
                             replay.next_step
                         );
                         inner.error = Some(msg.clone());
@@ -659,7 +667,8 @@ impl Scheduler {
                     TaskState::Suspended { point } => Some(point),
                     TaskState::Running | TaskState::Finished => {
                         panic!(
-                            "Internal error: task {} {} is selected to run, but its state was not Suspended, but rather is {:?}.",
+                            "Internal error: task {} {} is selected to run, but its state was not \
+                             Suspended, but rather is {:?}.",
                             task.id.0, task.name, task.state
                         );
                     }

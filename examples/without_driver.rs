@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use conc_checker::{
+use racedet::{
     ReplayTrace, capture_panics::capture_panic, execution_point, new_scheduler, new_start_barrier,
     task, with_scheduler, with_start_barrier,
 };

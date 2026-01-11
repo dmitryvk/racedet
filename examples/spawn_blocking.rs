@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use conc_checker::{
+use racedet::{
     current_scheduler,
     driver::Driver,
     execution_point, execution_point_blocking, maybe_with_scheduler_blocking, new_start_barrier,

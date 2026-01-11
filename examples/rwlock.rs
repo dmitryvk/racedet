@@ -1,14 +1,12 @@
-use std::sync::Arc;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-use conc_checker::driver::Driver;
-use conc_checker::sync_event;
-use conc_checker::sync_model::rwlock::{
-    LockedRwlock, LockingRwlock, ReleasedRwlock, RwlockId, RwlockMode,
+use racedet::{
+    driver::Driver,
+    execution_point, new_start_barrier, sync_event,
+    sync_model::rwlock::{LockedRwlock, LockingRwlock, ReleasedRwlock, RwlockId, RwlockMode},
+    task, with_start_barrier,
 };
-use conc_checker::{execution_point, new_start_barrier, task, with_start_barrier};
-use tokio::join;
-use tokio::sync::RwLock;
+use tokio::{join, sync::RwLock};
 
 #[tokio::main]
 async fn main() {
