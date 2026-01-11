@@ -1,6 +1,6 @@
 use std::{num::NonZeroU64, sync::Arc, task::Poll};
 
-use futures::executor::block_on;
+use futures_executor::block_on;
 use pin_project::pin_project;
 use tokio::sync::Barrier;
 
