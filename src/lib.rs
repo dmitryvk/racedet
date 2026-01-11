@@ -236,30 +236,6 @@ pub fn maybe_with_scheduler_blocking<T>(
     inner()
 }
 
-#[pin_project]
-struct RunAlong<MainFut, AuxFut> {
-    #[pin]
-    main_fut: MainFut,
-    #[pin]
-    aux_fut: futures::future::Fuse<AuxFut>,
-}
-
-impl<MainFut: Future, AuxFut: Future> Future for RunAlong<MainFut, AuxFut> {
-    type Output = MainFut::Output;
-
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        let this = self.project();
-        if let Poll::Ready(value) = this.main_fut.poll(cx) {
-            return Poll::Ready(value);
-        }
-        _ = this.aux_fut.poll(cx);
-        Poll::Pending
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum RunResult<T> {
     Ok(T),

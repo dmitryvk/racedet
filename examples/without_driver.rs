@@ -15,7 +15,7 @@ use tokio::join;
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let replay = std::env::var("CONC_CHECKER_REPLAY")
+    let replay = std::env::var("RACEDET_REPLAY")
         .ok()
         .map(|s| ReplayTrace::from_str(&s).unwrap());
     let (scheduler, control_fut) = new_scheduler(replay.as_ref());
@@ -37,8 +37,11 @@ async fn main() {
             println!("timeout {}", timeout.active_traces[0].stack_trace());
         }
     }
+    println!(
+        "To replay this execution, set this environment variable:\nRACEDET_REPLAY=\"{}\"",
+        scheduler.get_replay()
+    );
     println!("{}", scheduler.get_trace());
-    println!("CONC_CHECKER_REPLAY=\"{}\"", scheduler.get_replay());
 }
 
 async fn foo() {
