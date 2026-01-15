@@ -7,11 +7,11 @@ use std::{
 use axum::{
     Json, Router,
     extract::{Path, Request, State},
+    http::StatusCode,
     response::Response,
     routing::{get, post},
 };
 use futures::{FutureExt, future::BoxFuture};
-use hyper::StatusCode;
 use racedet::{
     ReplayTrace, SchedulerHandle, StartBarrier, execution_point, new_scheduler, task,
     with_start_barrier,
