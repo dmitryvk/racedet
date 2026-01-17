@@ -3,10 +3,10 @@ use std::time::Duration;
 use racedet::{
     current_scheduler,
     driver::Driver,
-    execution_point, execution_point_blocking, maybe_with_scheduler_blocking, new_start_barrier,
-    sync_event,
+    execution_point, execution_point_blocking, new_start_barrier, sync_event,
     sync_model::task_wait::{NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
-    task, task_blocking, with_start_barrier_blocking, with_task_group_blocking,
+    task, task_blocking, with_scheduler_blocking_opt, with_start_barrier_blocking,
+    with_task_group_blocking,
 };
 use tokio::{task::spawn_blocking, time::sleep};
 
@@ -39,7 +39,7 @@ async fn bar() {
         let scheduler = current_scheduler();
         move || {
             tracing::debug!("in spawn_blocking 1");
-            maybe_with_scheduler_blocking(scheduler, || {
+            with_scheduler_blocking_opt(scheduler, || {
                 task_blocking("spawn a", || {
                     with_task_group_blocking(task_group, 0, || {
                         with_start_barrier_blocking(barrier.clone(), || {
@@ -56,7 +56,7 @@ async fn bar() {
         let scheduler = current_scheduler();
         move || {
             tracing::debug!("in spawn_blocking 2");
-            maybe_with_scheduler_blocking(scheduler, || {
+            with_scheduler_blocking_opt(scheduler, || {
                 task_blocking("spawn b", || {
                     with_task_group_blocking(task_group, 1, || {
                         with_start_barrier_blocking(barrier.clone(), || {

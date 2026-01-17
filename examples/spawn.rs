@@ -3,9 +3,9 @@ use std::time::Duration;
 use racedet::{
     current_scheduler,
     driver::Driver,
-    execution_point, maybe_with_scheduler, new_start_barrier, sync_event,
+    execution_point, new_start_barrier, sync_event,
     sync_model::task_wait::{NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
-    task, with_start_barrier, with_task_group,
+    task, with_scheduler_opt, with_start_barrier, with_task_group,
 };
 use tokio::{spawn, time::sleep};
 
@@ -33,14 +33,14 @@ async fn bar() {
     let barrier = new_start_barrier(2);
     let task_group = TaskGroup::new();
     sync_event(NewTaskGroup(task_group));
-    let task_a = spawn(maybe_with_scheduler(
+    let task_a = spawn(with_scheduler_opt(
         current_scheduler(),
         task(
             "spawn a",
             with_task_group(task_group, 0, with_start_barrier(barrier.clone(), baz(1))),
         ),
     ));
-    let task_b = spawn(maybe_with_scheduler(
+    let task_b = spawn(with_scheduler_opt(
         current_scheduler(),
         task(
             "spawn b",
@@ -64,7 +64,7 @@ async fn baz(n: u32) {
     execution_point("a1").await;
     let task_group = TaskGroup::new();
     sync_event(NewTaskGroup(task_group));
-    let r = spawn(maybe_with_scheduler(
+    let r = spawn(with_scheduler_opt(
         current_scheduler(),
         task(
             format!("spawn baz {n}"),

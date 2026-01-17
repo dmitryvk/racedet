@@ -213,7 +213,7 @@ pub fn with_scheduler<Fut>(scheduler: SchedulerHandle, inner: Fut) -> WithSchedu
     }
 }
 
-pub fn maybe_with_scheduler<Fut>(
+pub fn with_scheduler_opt<Fut>(
     scheduler: Option<SchedulerHandle>,
     inner: Fut,
 ) -> WithScheduler<Fut> {
@@ -223,7 +223,7 @@ pub fn maybe_with_scheduler<Fut>(
     }
 }
 
-pub fn maybe_with_scheduler_blocking<T>(
+pub fn with_scheduler_blocking_opt<T>(
     scheduler: Option<SchedulerHandle>,
     inner: impl FnOnce() -> T,
 ) -> T {
