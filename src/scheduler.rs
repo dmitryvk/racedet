@@ -294,7 +294,7 @@ impl Scheduler {
         }
     }
 
-    pub(crate) async fn on_reached_point_with_pre_event<T: SyncEvent>(
+    pub(crate) async fn on_reached_point_with_event<T: SyncEvent>(
         &self,
         task_id: TaskId,
         name: &str,

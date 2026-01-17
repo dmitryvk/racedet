@@ -52,11 +52,11 @@ pub async fn execution_point(name: &str) {
     }
 }
 
-pub async fn execution_point_with_pre_event<T: SyncEvent>(name: &str, event: T) {
+pub async fn execution_point_with_event<T: SyncEvent>(name: &str, event: T) {
     if let Some(scheduler) = Scheduler::current()
         && let Some(task_id) = executor::current_task()
         && let Err(err) = scheduler
-            .on_reached_point_with_pre_event(task_id, name, event)
+            .on_reached_point_with_event(task_id, name, event)
             .await
     {
         panic!("invalid sync event: {err}");
@@ -87,8 +87,7 @@ async fn wait_for_start_barrier(barrier: StartBarrier) {
     use sync_model::start_barrier::{BarrierId, CompletedBarrierWait, WaitingForBarrier};
     if let StartBarrier(Some(barrier)) = barrier {
         tracing::debug!("sync_event barrier waiting");
-        execution_point_with_pre_event("barrier", WaitingForBarrier(BarrierId::new(&barrier)))
-            .await;
+        execution_point_with_event("barrier", WaitingForBarrier(BarrierId::new(&barrier))).await;
         tracing::debug!("barrier waiting");
         barrier.wait().await;
         tracing::debug!("barrier wait complete");
