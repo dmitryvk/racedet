@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     TaskId,
     sync_model::{
-        BadSyncError, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
+        BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
         TaskProgressDependencies,
     },
 };
@@ -83,7 +83,7 @@ impl ProcessSyncEvent<LockingRwlock> for RwlockModel {
         &mut self,
         task_id: TaskId,
         LockingRwlock(lock_id, lock_mode): LockingRwlock,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         self.waiting
             .entry(task_id)
             .or_default()
@@ -97,13 +97,13 @@ impl ProcessSyncEvent<AbortedLockingRwlock> for RwlockModel {
         &mut self,
         task_id: TaskId,
         AbortedLockingRwlock(lock_id, lock_mode): AbortedLockingRwlock,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         let waiting = self
             .waiting
             .get_mut(&task_id)
-            .ok_or_else(|| BadSyncError("the task is not waiting for the mutex".to_string()))?;
+            .ok_or_else(|| BadSync("the task is not waiting for the mutex".to_string()))?;
         if !waiting.remove(&(lock_id, lock_mode)) {
-            return Err(BadSyncError(
+            return Err(BadSync(
                 "the task is not waiting for the mutex".to_string(),
             ));
         }
@@ -119,13 +119,13 @@ impl ProcessSyncEvent<LockedRwlock> for RwlockModel {
         &mut self,
         task_id: TaskId,
         LockedRwlock(lock_id, lock_mode): LockedRwlock,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         let waiting = self
             .waiting
             .get_mut(&task_id)
-            .ok_or_else(|| BadSyncError("the task is not waiting for the mutex".to_string()))?;
+            .ok_or_else(|| BadSync("the task is not waiting for the mutex".to_string()))?;
         if !waiting.remove(&(lock_id.clone(), lock_mode)) {
-            return Err(BadSyncError(
+            return Err(BadSync(
                 "the task is not waiting for the mutex".to_string(),
             ));
         }
@@ -143,7 +143,7 @@ impl ProcessSyncEvent<LockedRwlock> for RwlockModel {
                         held.insert(task_id);
                     }
                     HeldRwlock::Write(_) => {
-                        return Err(BadSyncError("the lock is already held".to_string()));
+                        return Err(BadSync("the lock is already held".to_string()));
                     }
                 }
             }
@@ -160,13 +160,13 @@ impl ProcessSyncEvent<ReleasedRwlock> for RwlockModel {
         &mut self,
         task_id: TaskId,
         ReleasedRwlock(lock_id, lock_mode): ReleasedRwlock,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         match lock_mode {
             RwlockMode::Read => {
                 let held_by = self
                     .held_by
                     .get_mut(&lock_id)
-                    .ok_or_else(|| BadSyncError("the task was not holding the lock".to_string()))?;
+                    .ok_or_else(|| BadSync("the task was not holding the lock".to_string()))?;
                 match held_by {
                     HeldRwlock::Read(hash_set) => {
                         hash_set.remove(&task_id);
@@ -175,7 +175,7 @@ impl ProcessSyncEvent<ReleasedRwlock> for RwlockModel {
                         }
                     }
                     HeldRwlock::Write(_) => {
-                        return Err(BadSyncError("the lock is held as write lock".to_string()));
+                        return Err(BadSync("the lock is held as write lock".to_string()));
                     }
                 }
             }

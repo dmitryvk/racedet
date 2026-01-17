@@ -6,7 +6,7 @@ use std::{
 use crate::{
     TaskId,
     sync_model::{
-        BadSyncError, DynSyncModel, NotificationOutcome, ProcessSyncEvent, ProcessSyncInitEvent,
+        BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, ProcessSyncInitEvent,
         SyncEvent, SyncInitEvent, SyncModel, TaskProgressDependencies,
     },
 };
@@ -122,7 +122,7 @@ impl ProcessSyncEvent<NewTaskGroup> for TaskWaitModel {
         &mut self,
         task_id: TaskId,
         NewTaskGroup(task_group): NewTaskGroup,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         self.task_groups.insert(
             task_group,
             TaskGroupState {
@@ -140,7 +140,7 @@ impl ProcessSyncInitEvent<NewTaskGroup> for TaskWaitModel {
     fn on_init_event(
         &mut self,
         NewTaskGroup(task_group): NewTaskGroup,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         self.task_groups.insert(
             task_group,
             TaskGroupState {
@@ -157,7 +157,7 @@ impl ProcessSyncEvent<FreeTaskGroup> for TaskWaitModel {
         &mut self,
         task_id: TaskId,
         FreeTaskGroup(task_group): FreeTaskGroup,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         self.task_groups.remove(&task_group);
         tracing::debug!("task {task_id:?} removed task group {task_group:?}, new state: {self:?}");
         Ok(NotificationOutcome::Acknowledged)
@@ -169,7 +169,7 @@ impl ProcessSyncEvent<TaskCompleted> for TaskWaitModel {
         &mut self,
         task_id: TaskId,
         TaskCompleted(task_group, slot_idx): TaskCompleted,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         if let Some(task_group) = self.task_groups.get_mut(&task_group) {
             task_group.completed.insert(TaskGroupSlotIdx(slot_idx));
         }
@@ -185,7 +185,7 @@ impl ProcessSyncEvent<TaskWaitAnyN> for TaskWaitModel {
         &mut self,
         task_id: TaskId,
         TaskWaitAnyN(task_group, num_tasks): TaskWaitAnyN,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         self.task_waits.insert(
             task_id,
             TaskWaitCondition::AnyN {
@@ -206,7 +206,7 @@ impl ProcessSyncEvent<TaskWaitNth> for TaskWaitModel {
         &mut self,
         task_id: TaskId,
         TaskWaitNth(task_group, slot_idx): TaskWaitNth,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         self.task_waits.insert(
             task_id,
             TaskWaitCondition::Specific {
@@ -227,7 +227,7 @@ impl ProcessSyncEvent<TaskWaitCompleted> for TaskWaitModel {
         &mut self,
         task_id: TaskId,
         _: TaskWaitCompleted,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         self.task_waits.remove(&task_id);
         tracing::debug!("task wait completed for {task_id:?}, new state: {self:?}");
         Ok(NotificationOutcome::Acknowledged)

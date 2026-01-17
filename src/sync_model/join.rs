@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::{
     TaskId,
     sync_model::{
-        BadSyncError, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
+        BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
         TaskProgressDependencies,
     },
 };
@@ -28,9 +28,9 @@ impl ProcessSyncEvent<StartingJoin> for TaskJoinModel {
         &mut self,
         task_id: TaskId,
         _event: StartingJoin,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         if !self.is_in_join.insert(task_id) {
-            return Err(BadSyncError("task is already in join".to_string()));
+            return Err(BadSync("task is already in join".to_string()));
         }
 
         Ok(NotificationOutcome::Acknowledged)
@@ -42,9 +42,9 @@ impl ProcessSyncEvent<CompletedJoin> for TaskJoinModel {
         &mut self,
         task_id: TaskId,
         _event: CompletedJoin,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         if !self.is_in_join.remove(&task_id) {
-            return Err(BadSyncError("task is not in a join".to_string()));
+            return Err(BadSync("task is not in a join".to_string()));
         }
 
         Ok(NotificationOutcome::Acknowledged)

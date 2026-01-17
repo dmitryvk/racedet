@@ -102,7 +102,7 @@ mod tests {
 
     use super::*;
     use crate::sync_model::{
-        BadSyncError, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
+        BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
     };
 
     #[test]
@@ -342,7 +342,7 @@ mod tests {
             &mut self,
             task_id: TaskId,
             ProvideDeps(deps): ProvideDeps,
-        ) -> Result<NotificationOutcome, BadSyncError> {
+        ) -> Result<NotificationOutcome, BadSync> {
             self.task_deps.insert(task_id, deps);
             Ok(NotificationOutcome::Acknowledged)
         }

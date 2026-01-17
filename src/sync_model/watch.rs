@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     TaskId,
     sync_model::{
-        BadSyncError, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
+        BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
         TaskProgressDependencies,
     },
 };
@@ -59,7 +59,7 @@ impl ProcessSyncEvent<WaitingForWatchUpdate> for WatchModel {
         &mut self,
         task_id: TaskId,
         WaitingForWatchUpdate(watch_id): WaitingForWatchUpdate,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         tracing::debug!("WaitingForWatchUpdate task_id={task_id:?} watch_id={watch_id:?} {self:?}");
         self.tasks.insert(task_id, watch_id);
         self.waiters.entry(watch_id).or_default().insert(task_id);
@@ -72,7 +72,7 @@ impl ProcessSyncEvent<WatchNotified> for WatchModel {
         &mut self,
         _task_id: TaskId,
         WatchNotified(watch_id): WatchNotified,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         tracing::debug!("WatchNotified watch_id={watch_id:?} {self:?}");
         if let Some(waiters) = self.waiters.remove(&watch_id) {
             for task_id in waiters {

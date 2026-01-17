@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     TaskId,
     sync_model::{
-        BadSyncError, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
+        BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
         TaskProgressDependencies,
     },
 };
@@ -62,16 +62,16 @@ impl ProcessSyncEvent<LockingMutex> for MutexModel {
         &mut self,
         task_id: TaskId,
         LockingMutex(lock_id): LockingMutex,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         if self.held_by.get(&lock_id) == Some(&task_id) {
-            return Err(BadSyncError("the task already holds the mutex".to_string()));
+            return Err(BadSync("the task already holds the mutex".to_string()));
         }
         if self
             .waiting
             .get(&task_id)
             .is_some_and(|waiting| waiting.contains(&lock_id))
         {
-            return Err(BadSyncError(
+            return Err(BadSync(
                 "the task is already waiting for the mutex".to_string(),
             ));
         }
@@ -85,13 +85,13 @@ impl ProcessSyncEvent<AbortedLockingMutex> for MutexModel {
         &mut self,
         task_id: TaskId,
         AbortedLockingMutex(lock_id): AbortedLockingMutex,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         let waiting = self
             .waiting
             .get_mut(&task_id)
-            .ok_or_else(|| BadSyncError("the task is not waiting for the mutex".to_string()))?;
+            .ok_or_else(|| BadSync("the task is not waiting for the mutex".to_string()))?;
         if !waiting.remove(&lock_id) {
-            return Err(BadSyncError(
+            return Err(BadSync(
                 "the task is not waiting for the mutex".to_string(),
             ));
         }
@@ -107,13 +107,13 @@ impl ProcessSyncEvent<LockedMutex> for MutexModel {
         &mut self,
         task_id: TaskId,
         LockedMutex(lock_id): LockedMutex,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         let waiting = self
             .waiting
             .get_mut(&task_id)
-            .ok_or_else(|| BadSyncError("the task is not waiting for the mutex".to_string()))?;
+            .ok_or_else(|| BadSync("the task is not waiting for the mutex".to_string()))?;
         if !waiting.remove(&lock_id) {
-            return Err(BadSyncError(
+            return Err(BadSync(
                 "the task is not waiting for the mutex".to_string(),
             ));
         }
@@ -130,9 +130,9 @@ impl ProcessSyncEvent<ReleasedMutex> for MutexModel {
         &mut self,
         task_id: TaskId,
         ReleasedMutex(lock_id): ReleasedMutex,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         if self.held_by.remove(&lock_id) != Some(task_id) {
-            return Err(BadSyncError(
+            return Err(BadSync(
                 "the task was not holding the lock".to_string(),
             ));
         }

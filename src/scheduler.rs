@@ -17,7 +17,7 @@ use crate::{
         NextSchedulerAction, TaskScheduleChoice, get_eligible_scheduler_choices,
     },
     string_pool::{StringIdx, StringPool},
-    sync_model::{BadSyncError, NotificationOutcome, SyncEvent, SyncInitEvent, SyncModelRegistry},
+    sync_model::{BadSync, NotificationOutcome, SyncEvent, SyncInitEvent, SyncModelRegistry},
 };
 
 mod get_runnable_tasks;
@@ -203,7 +203,7 @@ impl Scheduler {
         &self,
         task_id: TaskId,
         event: T,
-    ) -> Result<(), BadSyncError> {
+    ) -> Result<(), BadSync> {
         let mut inner = self.lock();
         match inner.sync_model.on_notified(task_id, event)? {
             NotificationOutcome::Acknowledged => {
@@ -221,10 +221,7 @@ impl Scheduler {
         Ok(())
     }
 
-    pub(crate) fn on_sync_init_event<T: SyncInitEvent>(
-        &self,
-        event: T,
-    ) -> Result<(), BadSyncError> {
+    pub(crate) fn on_sync_init_event<T: SyncInitEvent>(&self, event: T) -> Result<(), BadSync> {
         let mut inner = self.lock();
         match inner.sync_model.on_init_event(event)? {
             NotificationOutcome::Acknowledged => {
@@ -299,7 +296,7 @@ impl Scheduler {
         task_id: TaskId,
         name: &str,
         event: T,
-    ) -> Result<(), BadSyncError> {
+    ) -> Result<(), BadSync> {
         tracing::debug!("reached point {task_id:?} {name}");
         let name = self.string_pool.intern(name);
 

@@ -57,7 +57,7 @@ impl SyncModelRegistry {
         &mut self,
         task_id: TaskId,
         event: TEvent,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         let sync_model = self.get_sync_model_mut::<TEvent::Model>();
         sync_model.on_event(task_id, event)
     }
@@ -65,7 +65,7 @@ impl SyncModelRegistry {
     pub(crate) fn on_init_event<TEvent: SyncInitEvent>(
         &mut self,
         event: TEvent,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         let sync_model = self.get_sync_model_mut::<TEvent::Model>();
         sync_model.on_init_event(event)
     }
@@ -87,15 +87,11 @@ pub trait DynSyncModel: Any + Send + Sync + 'static {
 pub trait SyncModel: DynSyncModel + Default {}
 
 pub trait ProcessSyncEvent<TOp: SyncEvent>: SyncModel {
-    fn on_event(
-        &mut self,
-        task_id: TaskId,
-        event: TOp,
-    ) -> Result<NotificationOutcome, BadSyncError>;
+    fn on_event(&mut self, task_id: TaskId, event: TOp) -> Result<NotificationOutcome, BadSync>;
 }
 
 pub trait ProcessSyncInitEvent<TOp: SyncInitEvent>: SyncModel {
-    fn on_init_event(&mut self, event: TOp) -> Result<NotificationOutcome, BadSyncError>;
+    fn on_init_event(&mut self, event: TOp) -> Result<NotificationOutcome, BadSync>;
 }
 
 pub trait SyncInitEvent: Sized {
@@ -159,15 +155,15 @@ impl TaskProgressDependencies {
 }
 
 #[derive(Debug)]
-pub struct BadSyncError(String);
+pub struct BadSync(String);
 
-impl std::fmt::Display for BadSyncError {
+impl std::fmt::Display for BadSync {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "bad use of SyncModel: {}", self.0)
     }
 }
 
-impl std::error::Error for BadSyncError {}
+impl std::error::Error for BadSync {}
 
 #[cfg(test)]
 mod tests {
@@ -226,14 +222,12 @@ mod tests {
             &mut self,
             task_id: TaskId,
             TakingLock(lock_id): TakingLock,
-        ) -> Result<NotificationOutcome, BadSyncError> {
+        ) -> Result<NotificationOutcome, BadSync> {
             if self.locks_waiting.contains_key(&task_id) {
-                return Err(BadSyncError("task already waiting for a lock".to_string()));
+                return Err(BadSync("task already waiting for a lock".to_string()));
             }
             if self.locks_held_by.get(&lock_id) == Some(&task_id) {
-                return Err(BadSyncError(
-                    "the task is already holding the lock".to_string(),
-                ));
+                return Err(BadSync("the task is already holding the lock".to_string()));
             }
             self.locks_waiting.insert(task_id, lock_id);
             Ok(NotificationOutcome::Acknowledged)
@@ -244,11 +238,9 @@ mod tests {
             &mut self,
             task_id: TaskId,
             AbortTakingLock(lock_id): AbortTakingLock,
-        ) -> Result<NotificationOutcome, BadSyncError> {
+        ) -> Result<NotificationOutcome, BadSync> {
             if self.locks_waiting.remove(&task_id) != Some(lock_id) {
-                return Err(BadSyncError(
-                    "the task is not waiting for the lock".to_string(),
-                ));
+                return Err(BadSync("the task is not waiting for the lock".to_string()));
             }
             Ok(NotificationOutcome::Acknowledged)
         }
@@ -258,12 +250,12 @@ mod tests {
             &mut self,
             task_id: TaskId,
             LockTaken(lock_id): LockTaken,
-        ) -> Result<NotificationOutcome, BadSyncError> {
+        ) -> Result<NotificationOutcome, BadSync> {
             if self.locks_held_by.contains_key(&lock_id) {
-                return Err(BadSyncError("lock is already taken".to_string()));
+                return Err(BadSync("lock is already taken".to_string()));
             }
             if self.locks_waiting.remove(&task_id) != Some(lock_id) {
-                return Err(BadSyncError("task is not waiting for a lock".to_string()));
+                return Err(BadSync("task is not waiting for a lock".to_string()));
             }
             self.locks_held_by.insert(lock_id, task_id);
             Ok(NotificationOutcome::Acknowledged)
@@ -274,11 +266,9 @@ mod tests {
             &mut self,
             task_id: TaskId,
             LockReleased(lock_id): LockReleased,
-        ) -> Result<NotificationOutcome, BadSyncError> {
+        ) -> Result<NotificationOutcome, BadSync> {
             if self.locks_held_by.remove(&lock_id) != Some(task_id) {
-                return Err(BadSyncError(
-                    "the lock was not taken by the task".to_string(),
-                ));
+                return Err(BadSync("the lock was not taken by the task".to_string()));
             }
             Ok(NotificationOutcome::Acknowledged)
         }

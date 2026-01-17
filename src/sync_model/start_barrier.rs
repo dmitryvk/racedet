@@ -8,7 +8,7 @@ use tokio::sync::Barrier;
 use crate::{
     TaskId,
     sync_model::{
-        BadSyncError, DynSyncModel, NotificationOutcome, ProcessSyncEvent, ProcessSyncInitEvent,
+        BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, ProcessSyncInitEvent,
         SyncEvent, SyncInitEvent, SyncModel, TaskProgressDependencies,
     },
 };
@@ -84,7 +84,7 @@ impl SyncEvent for CompletedBarrierWait {
 }
 
 impl ProcessSyncInitEvent<NewBarrier> for BarrierModel {
-    fn on_init_event(&mut self, event: NewBarrier) -> Result<NotificationOutcome, BadSyncError> {
+    fn on_init_event(&mut self, event: NewBarrier) -> Result<NotificationOutcome, BadSync> {
         self.barriers.insert(
             event.barrier,
             BarrierState {
@@ -102,14 +102,14 @@ impl ProcessSyncEvent<WaitingForBarrier> for BarrierModel {
         &mut self,
         task_id: TaskId,
         WaitingForBarrier(barrier_id): WaitingForBarrier,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         tracing::debug!("barriers before waiting {barrier_id:?}: {self:?}");
         let barrier = self
             .barriers
             .get_mut(&barrier_id)
-            .ok_or_else(|| BadSyncError("barrier not exists".to_string()))?;
+            .ok_or_else(|| BadSync("barrier not exists".to_string()))?;
         if self.task_waiting.insert(task_id, barrier_id).is_some() {
-            return Err(BadSyncError(
+            return Err(BadSync(
                 "task is already waiting on a barrier".to_string(),
             ));
         }
@@ -127,11 +127,11 @@ impl ProcessSyncEvent<AbortedWaitingForBarrier> for BarrierModel {
         &mut self,
         task_id: TaskId,
         AbortedWaitingForBarrier(barrier_id): AbortedWaitingForBarrier,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         let barrier = self
             .barriers
             .get_mut(&barrier_id)
-            .ok_or_else(|| BadSyncError("barrier not exists".to_string()))?;
+            .ok_or_else(|| BadSync("barrier not exists".to_string()))?;
         barrier.tasks.remove(&task_id);
         if barrier.tasks.is_empty() {
             self.barriers.remove(&barrier_id);
@@ -146,11 +146,11 @@ impl ProcessSyncEvent<CompletedBarrierWait> for BarrierModel {
         &mut self,
         task_id: TaskId,
         CompletedBarrierWait(barrier_id): CompletedBarrierWait,
-    ) -> Result<NotificationOutcome, BadSyncError> {
+    ) -> Result<NotificationOutcome, BadSync> {
         let barrier = self
             .barriers
             .get_mut(&barrier_id)
-            .ok_or_else(|| BadSyncError("barrier not exists".to_string()))?;
+            .ok_or_else(|| BadSync("barrier not exists".to_string()))?;
         barrier.tasks.remove(&task_id);
         if barrier.tasks.is_empty() {
             self.barriers.remove(&barrier_id);
