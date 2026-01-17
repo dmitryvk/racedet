@@ -5,11 +5,11 @@ use itertools::Itertools;
 use crate::{TaskId, TaskStableId};
 
 #[derive(Debug, Clone)]
-pub struct Trace {
-    pub(crate) trace: Vec<TraceItem>,
+pub struct TraceView {
+    pub(crate) trace: Vec<TraceViewItem>,
 }
 
-impl std::fmt::Display for Trace {
+impl std::fmt::Display for TraceView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for (i, step) in self.trace.iter().enumerate() {
             writeln!(f, "{i}. {step}")?;
@@ -19,7 +19,7 @@ impl std::fmt::Display for Trace {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum TraceItem {
+pub(crate) enum TraceViewItem {
     TaskStarted(TaskRef),
     TaskFinished(TaskRef),
     TaskSuspended {
@@ -67,16 +67,16 @@ pub(crate) struct TaskSnapshot {
     pub(crate) position: Option<Arc<str>>,
 }
 
-impl std::fmt::Display for TraceItem {
+impl std::fmt::Display for TraceViewItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TraceItem::TaskStarted(task_ref) => write!(f, "start {task_ref}"),
-            TraceItem::TaskFinished(task_ref) => write!(f, "finish {task_ref}"),
-            TraceItem::TaskSuspended {
+            TraceViewItem::TaskStarted(task_ref) => write!(f, "start {task_ref}"),
+            TraceViewItem::TaskFinished(task_ref) => write!(f, "finish {task_ref}"),
+            TraceViewItem::TaskSuspended {
                 task,
                 suspend_point,
             } => write!(f, "suspend {task} {suspend_point}"),
-            TraceItem::AutoResumedTasks {
+            TraceViewItem::AutoResumedTasks {
                 resumed_tasks,
                 running_tasks,
                 suspended_tasks,
@@ -88,7 +88,7 @@ impl std::fmt::Display for TraceItem {
                 running_tasks = running_tasks.iter().map(ToString::to_string).join(", "),
                 suspended_tasks = suspended_tasks.iter().map(ToString::to_string).join(", "),
             ),
-            TraceItem::ScheduleDecision {
+            TraceViewItem::ScheduleDecision {
                 resumed_tasks,
                 running_tasks,
                 suspended_tasks,

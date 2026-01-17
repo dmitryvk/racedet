@@ -6,7 +6,7 @@ use tokio::sync::Barrier;
 
 use crate::{
     executor::{CurrentTaskIdGuard, TaskFuture},
-    full_trace::Trace,
+    full_trace::TraceView,
     scheduler::{RandomTaskSelector, Scheduler},
     sync_model::{SyncEvent, SyncInitEvent},
 };
@@ -184,7 +184,7 @@ impl SchedulerHandle {
         self.0.run_control_loop().await;
     }
 
-    pub fn get_trace(&self) -> Trace {
+    pub fn get_trace(&self) -> TraceView {
         self.0.get_trace()
     }
 

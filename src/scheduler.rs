@@ -10,8 +10,8 @@ use std::{
 use itertools::Itertools;
 
 use crate::{
-    TaskId, TaskStableId, Trace,
-    full_trace::{FullTraceTaskId, TaskRef, TraceItem},
+    TaskId, TaskStableId, TraceView,
+    full_trace::{FullTraceTaskId, TaskRef, TraceViewItem},
     replay_trace::ReplayTrace,
     scheduler::get_runnable_tasks::{
         NextSchedulerAction, TaskScheduleChoice, get_eligible_scheduler_choices,
@@ -367,23 +367,23 @@ impl Scheduler {
         Ok(())
     }
 
-    pub(crate) fn get_trace(&self) -> Trace {
+    pub(crate) fn get_trace(&self) -> TraceView {
         let inner = self.lock();
-        Trace {
+        TraceView {
             trace: inner
                 .trace
                 .iter()
                 .map(|trace_event| match trace_event {
                     TraceEvent::TaskStarted(task_id) => {
-                        TraceItem::TaskStarted(self.make_task_ref(&inner, *task_id))
+                        TraceViewItem::TaskStarted(self.make_task_ref(&inner, *task_id))
                     }
                     TraceEvent::TaskFinished(task_id) => {
-                        TraceItem::TaskFinished(self.make_task_ref(&inner, *task_id))
+                        TraceViewItem::TaskFinished(self.make_task_ref(&inner, *task_id))
                     }
                     TraceEvent::TaskSuspended {
                         task,
                         suspend_point,
-                    } => TraceItem::TaskSuspended {
+                    } => TraceViewItem::TaskSuspended {
                         task: self.make_task_ref(&inner, *task),
                         suspend_point: self
                             .string_pool
@@ -394,7 +394,7 @@ impl Scheduler {
                         resumed_tasks,
                         running_tasks,
                         suspended_tasks,
-                    } => TraceItem::AutoResumedTasks {
+                    } => TraceViewItem::AutoResumedTasks {
                         resumed_tasks: resumed_tasks
                             .iter()
                             .map(|task_id| self.make_task_ref(&inner, *task_id))
@@ -413,7 +413,7 @@ impl Scheduler {
                         running_tasks,
                         suspended_tasks,
                         options,
-                    } => TraceItem::ScheduleDecision {
+                    } => TraceViewItem::ScheduleDecision {
                         resumed_tasks: resumed_tasks
                             .iter()
                             .map(|task_id| self.make_task_ref(&inner, *task_id))

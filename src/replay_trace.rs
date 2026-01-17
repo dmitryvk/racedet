@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use crate::{
     TaskStableId,
-    full_trace::{Trace, TraceItem},
+    full_trace::{TraceView, TraceViewItem},
     string_pool::{StringIdx, StringPool},
 };
 
@@ -96,7 +96,7 @@ impl ReplayTrace {
         crate::replay_trace_parsed::ReplayTrace { strings, steps }
     }
 
-    pub(crate) fn from_trace(string_pool: Arc<StringPool>, trace: &Trace) -> Self {
+    pub(crate) fn from_trace(string_pool: Arc<StringPool>, trace: &TraceView) -> Self {
         let steps = trace
             .trace
             .iter()
@@ -108,8 +108,8 @@ impl ReplayTrace {
         }
     }
 
-    fn step_from_item(item: &TraceItem, strings: &StringPool) -> Option<ReplayStep> {
-        let TraceItem::ScheduleDecision {
+    fn step_from_item(item: &TraceViewItem, strings: &StringPool) -> Option<ReplayStep> {
+        let TraceViewItem::ScheduleDecision {
             resumed_tasks,
             running_tasks: _,
             suspended_tasks,
