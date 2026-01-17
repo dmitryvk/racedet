@@ -10,7 +10,6 @@ use crate::{
     scheduler::{RandomTaskSelector, Scheduler},
     sync_model::{SyncEvent, SyncInitEvent},
 };
-mod capture_panics;
 pub mod driver;
 mod executor;
 pub mod full_trace;
