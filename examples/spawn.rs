@@ -1,13 +1,9 @@
 use std::time::Duration;
 
 use racedet::{
-    current_scheduler,
     driver::Driver,
     sync_model::task_wait::{NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
-    task::{
-        execution_point, new_start_barrier, sync_event, task, with_start_barrier, with_task_group,
-    },
-    with_scheduler_opt,
+    task::{StartBarrier, Task, execution_point, sync_event, task},
 };
 use tokio::{spawn, time::sleep};
 
@@ -25,29 +21,27 @@ async fn main() {
 }
 
 async fn foo() {
-    task("bar", bar()).await;
+    task(Task::new("bar"), bar()).await;
 }
 
 async fn bar() {
     execution_point("before spawn").await;
 
     // task_join means that the current task is waiting for nested tasks and should not be scheduled in of itself (but other tasks should be scheduled instead)
-    let barrier = new_start_barrier(2);
+    let barrier = StartBarrier::new(2);
     let task_group = TaskGroup::new();
     sync_event(NewTaskGroup(task_group));
-    let task_a = spawn(with_scheduler_opt(
-        current_scheduler(),
-        task(
-            "spawn a",
-            with_task_group(task_group, 0, with_start_barrier(barrier.clone(), baz(1))),
-        ),
+    let task_a = spawn(task(
+        Task::new("spawn a")
+            .with_task_group(task_group, 0)
+            .with_start_barrier(barrier.clone()),
+        baz(1),
     ));
-    let task_b = spawn(with_scheduler_opt(
-        current_scheduler(),
-        task(
-            "spawn b",
-            with_task_group(task_group, 1, with_start_barrier(barrier.clone(), baz(2))),
-        ),
+    let task_b = spawn(task(
+        Task::new("spawn b")
+            .with_task_group(task_group, 1)
+            .with_start_barrier(barrier.clone()),
+        baz(2),
     ));
     // TODO: sleep is a hack to ensure that spawn happens before the task becomes blocked
     sleep(Duration::from_millis(1)).await;
@@ -66,12 +60,9 @@ async fn baz(n: u32) {
     execution_point("a1").await;
     let task_group = TaskGroup::new();
     sync_event(NewTaskGroup(task_group));
-    let r = spawn(with_scheduler_opt(
-        current_scheduler(),
-        task(
-            format!("spawn baz {n}"),
-            with_task_group(task_group, 0, execution_point("q")),
-        ),
+    let r = spawn(task(
+        Task::new(format!("spawn baz {n}")).with_task_group(task_group, 0),
+        execution_point("q"),
     ));
     // TODO: call TaskWaitAnyN before spawn
     // TODO: TaskWaitAnyN introduces non-determinism if a child task is spawned when the current task is "blocked"

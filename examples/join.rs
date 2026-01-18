@@ -4,9 +4,7 @@ use futures::FutureExt;
 use racedet::{
     driver::Driver,
     sync_model::task_wait::{NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
-    task::{
-        execution_point, new_start_barrier, sync_event, task, with_start_barrier, with_task_group,
-    },
+    task::{StartBarrier, Task, execution_point, sync_event, task},
 };
 use tokio::{join, select, time::sleep};
 
@@ -24,7 +22,7 @@ async fn main() {
 }
 
 async fn foo() {
-    task("bar", bar()).await;
+    task(Task::new("bar"), bar()).await;
 }
 
 async fn bar() {
@@ -32,7 +30,7 @@ async fn bar() {
 
     // task_join means that the current task is waiting for nested tasks
     // and should not be scheduled in of itself (but other tasks should be scheduled instead)
-    let barrier = new_start_barrier(2);
+    let barrier = StartBarrier::new(2);
     let task_group = TaskGroup::new();
     sync_event(NewTaskGroup(task_group));
     tracing::debug!("sync_event starting join");
@@ -40,48 +38,46 @@ async fn bar() {
     tracing::debug!("starting join");
     join!(
         task(
-            "a",
-            with_task_group(
-                task_group,
-                0,
-                with_start_barrier(barrier.clone(), execution_point("a"))
-            )
+            Task::new("a")
+                .with_task_group(task_group, 0)
+                .with_start_barrier(barrier.clone()),
+            async {
+                execution_point("a").await;
+            }
         ),
         task(
-            "b",
-            with_task_group(
-                task_group,
-                1,
-                with_start_barrier(barrier.clone(), execution_point("b"))
-            )
-        )
+            Task::new("b")
+                .with_task_group(task_group, 1)
+                .with_start_barrier(barrier.clone()),
+            async {
+                execution_point("b").await;
+            }
+        ),
     );
     tracing::debug!("joined");
     sync_event(TaskWaitCompleted);
     execution_point("joined").await;
     tracing::info!("ok");
     execution_point("select start").await;
-    let barrier = new_start_barrier(2);
+    let barrier = StartBarrier::new(2);
     let task_group = TaskGroup::new();
     sync_event(NewTaskGroup(task_group));
     tracing::debug!("sync_event starting select");
     sync_event(TaskWaitAnyN(task_group, 1));
     tracing::debug!("starting select");
     let task_c = task(
-        "c",
-        with_task_group(
-            task_group,
-            0,
-            with_start_barrier(barrier.clone(), execution_point("c")),
-        ),
+        Task::new("c")
+            .with_task_group(task_group, 0)
+            .with_start_barrier(barrier.clone()),
+        async {
+            execution_point("c").await;
+        },
     );
     let task_d = task(
-        "d",
-        with_task_group(
-            task_group,
-            1,
-            with_start_barrier(barrier.clone(), execution_point("d")),
-        ),
+        Task::new("d")
+            .with_task_group(task_group, 1)
+            .with_start_barrier(barrier.clone()),
+        async { execution_point("d").await },
     );
     select! {
         _ = task_c => {},

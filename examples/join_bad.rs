@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use racedet::{
     driver::Driver,
-    task::{execution_point, task},
+    task::{Task, execution_point, task},
 };
 use tokio::join;
 
@@ -20,7 +20,7 @@ async fn main() {
 }
 
 async fn foo() {
-    task("bar", bar()).await;
+    task(Task::new("bar"), bar()).await;
 }
 
 async fn bar() {

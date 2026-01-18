@@ -3,7 +3,7 @@ use std::time::Duration;
 use racedet::{
     driver::Driver,
     sync_model::watch::{WaitingForWatchUpdate, WatchId, WatchNotified},
-    task::{execution_point, new_start_barrier, sync_event, task, with_start_barrier},
+    task::{StartBarrier, Task, execution_point, sync_event, task},
 };
 use tokio::{
     join,
@@ -24,21 +24,21 @@ async fn main() {
 }
 
 async fn foo() {
-    let barrier = new_start_barrier(3);
+    let barrier = StartBarrier::new(3);
     let (tx, rx) = tokio::sync::watch::channel(1);
     join!(
         task(
-            "producer",
-            with_start_barrier(barrier.clone(), producer(tx))
+            Task::new("producer").with_start_barrier(barrier.clone()),
+            producer(tx)
         ),
         task(
-            "consumer1",
-            with_start_barrier(barrier.clone(), consumer(rx.clone()))
+            Task::new("consumer1").with_start_barrier(barrier.clone()),
+            consumer(rx.clone())
         ),
         task(
-            "consumer2",
-            with_start_barrier(barrier.clone(), consumer(rx.clone()))
-        )
+            Task::new("consumer2").with_start_barrier(barrier.clone()),
+            consumer(rx.clone())
+        ),
     );
 }
 

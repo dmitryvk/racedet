@@ -14,7 +14,7 @@ use axum::{
 use futures::{FutureExt, future::BoxFuture};
 use racedet::{
     ReplayTrace, SchedulerHandle, new_scheduler,
-    task::{StartBarrier, execution_point, new_start_barrier, task, with_start_barrier},
+    task::{StartBarrier, Task, execution_point, task},
     with_scheduler_blocking,
 };
 use serde::{Deserialize, Serialize};
@@ -206,12 +206,11 @@ where
                 header.concurrent_task_count,
                 replay,
             );
-            racedet::with_scheduler(
-                scheduler,
-                task(
-                    header.task_id,
-                    with_start_barrier(barrier, self.inner.call(req)),
-                ),
+            task(
+                Task::new(header.task_id)
+                    .with_start_barrier(barrier)
+                    .with_scheduler(Some(scheduler)),
+                self.inner.call(req),
             )
             .boxed()
         } else {
@@ -286,7 +285,7 @@ impl SchedulerRegistry {
             Entry::Vacant(entry) => {
                 let replay = replay.map(|s| ReplayTrace::from_str(s).unwrap());
                 let (scheduler, scheduler_fut) = new_scheduler(replay.as_ref());
-                let barrier = with_scheduler_blocking(&scheduler, || new_start_barrier(task_count));
+                let barrier = with_scheduler_blocking(&scheduler, || StartBarrier::new(task_count));
                 let cancellation_token = CancellationToken::new();
                 let id = entry.key().clone();
                 tokio::spawn({

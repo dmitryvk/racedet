@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use racedet::{
     driver::Driver,
     sync_model::mutex::{LockedMutex, LockingMutex, MutexId, ReleasedMutex},
-    task::{execution_point, new_start_barrier, sync_event, task, with_start_barrier},
+    task::{StartBarrier, Task, execution_point, sync_event, task},
 };
 use tokio::{join, sync::Mutex};
 
@@ -22,19 +22,23 @@ async fn main() {
 async fn foo() {
     execution_point("before").await;
 
-    let barrier = new_start_barrier(2);
+    let barrier = StartBarrier::new(2);
 
     let var = Arc::new(Mutex::new(1));
     let mutex_id = MutexId::new("m".to_string());
 
     join!(
         task(
-            "inc1",
-            with_start_barrier(barrier.clone(), do_inc(var.clone(), mutex_id.clone()))
+            Task::new("inc1").with_start_barrier(barrier.clone()),
+            async {
+                do_inc(var.clone(), mutex_id.clone()).await;
+            }
         ),
         task(
-            "inc2",
-            with_start_barrier(barrier.clone(), do_inc(var.clone(), mutex_id.clone()))
+            Task::new("inc2").with_start_barrier(barrier.clone()),
+            async {
+                do_inc(var.clone(), mutex_id.clone()).await;
+            }
         ),
     );
 

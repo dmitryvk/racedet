@@ -5,7 +5,7 @@ use std::{
 
 use racedet::{
     driver::Driver,
-    task::{execution_point, new_start_barrier, task, with_start_barrier},
+    task::{StartBarrier, Task, execution_point, task},
 };
 use tokio::join;
 
@@ -24,10 +24,16 @@ async fn main() {
 
 async fn foo() {
     let var = Arc::new(AtomicI64::new(0));
-    let barrier = new_start_barrier(2);
+    let barrier = StartBarrier::new(2);
     join!(
-        task("bar", with_start_barrier(barrier.clone(), bar(var.clone()))),
-        task("bar", with_start_barrier(barrier.clone(), bar(var.clone())))
+        task(
+            Task::new("bar").with_start_barrier(barrier.clone()),
+            bar(var.clone())
+        ),
+        task(
+            Task::new("bar").with_start_barrier(barrier.clone()),
+            bar(var.clone())
+        )
     );
     let result = var.load(std::sync::atomic::Ordering::Relaxed);
     assert!(result == 1 || result == 2);

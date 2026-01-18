@@ -5,7 +5,7 @@ use pin_project_lite::pin_project;
 use crate::{
     full_trace::TraceView,
     scheduler::{RandomTaskSelector, Scheduler},
-    task::{StartBarrier, new_start_barrier},
+    task::StartBarrier,
 };
 pub mod driver;
 mod executor;
@@ -55,7 +55,7 @@ impl SchedulerHandle {
     }
 
     pub fn new_start_barrier(&self, task_count: usize) -> StartBarrier {
-        with_scheduler_blocking(self, || new_start_barrier(task_count))
+        with_scheduler_blocking(self, || StartBarrier::new(task_count))
     }
 }
 

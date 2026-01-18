@@ -1,16 +1,19 @@
-use std::{num::NonZeroU64, sync::Arc};
+use std::{borrow::Cow, num::NonZeroU64, sync::Arc};
 
 use futures_executor::block_on;
+use futures_util::future::Either;
 use tokio::sync::Barrier;
 
 use crate::{
-    current_scheduler,
+    SchedulerHandle, current_scheduler,
     executor::{self, CurrentTaskIdGuard, TaskFuture},
     scheduler::Scheduler,
     sync_model::{
         SyncEvent, SyncInitEvent,
         start_barrier::{BarrierId, NewBarrier},
+        task_wait::TaskGroup,
     },
+    with_scheduler,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -75,22 +78,19 @@ pub fn execution_point_blocking(name: &str) {
 #[derive(Clone)]
 pub struct StartBarrier(Option<Arc<Barrier>>);
 
-pub fn new_start_barrier(task_count: usize) -> StartBarrier {
-    if current_scheduler().is_some() {
-        let start_barrier = Arc::new(Barrier::new(task_count));
-        sync_init_event(NewBarrier {
-            barrier: BarrierId::new(&start_barrier),
-            capacity: task_count,
-        });
-        StartBarrier(Some(start_barrier))
-    } else {
-        StartBarrier(None)
+impl StartBarrier {
+    pub fn new(task_count: usize) -> Self {
+        if current_scheduler().is_some() {
+            let start_barrier = Arc::new(Barrier::new(task_count));
+            sync_init_event(NewBarrier {
+                barrier: BarrierId::new(&start_barrier),
+                capacity: task_count,
+            });
+            StartBarrier(Some(start_barrier))
+        } else {
+            StartBarrier(None)
+        }
     }
-}
-
-pub async fn with_start_barrier<T>(barrier: StartBarrier, inner: impl Future<Output = T>) -> T {
-    wait_for_start_barrier(barrier).await;
-    inner.await
 }
 
 async fn wait_for_start_barrier(barrier: StartBarrier) {
@@ -105,63 +105,95 @@ async fn wait_for_start_barrier(barrier: StartBarrier) {
     }
 }
 
-pub fn with_start_barrier_blocking<T>(barrier: StartBarrier, inner: impl FnOnce() -> T) -> T {
-    block_on(wait_for_start_barrier(barrier));
-    inner()
+pub struct Task {
+    name: Cow<'static, str>,
+    scheduler: Option<SchedulerHandle>,
+    task_group: Option<(TaskGroup, usize)>,
+    start_barrier: Option<StartBarrier>,
 }
 
-pub async fn with_task_group<T>(
-    task_group: crate::sync_model::task_wait::TaskGroup,
-    task_idx: usize,
-    inner: impl Future<Output = T>,
-) -> T {
-    let res = inner.await;
-    sync_event(crate::sync_model::task_wait::TaskCompleted(
-        task_group, task_idx,
-    ));
-    res
+impl Task {
+    pub fn new(name: impl Into<Cow<'static, str>>) -> Task {
+        Self {
+            name: name.into(),
+            scheduler: current_scheduler(),
+            task_group: None,
+            start_barrier: None,
+        }
+    }
+
+    pub fn with_scheduler(mut self, scheduler: Option<SchedulerHandle>) -> Self {
+        self.scheduler = scheduler;
+        self
+    }
+
+    pub fn with_start_barrier(mut self, start_barrier: StartBarrier) -> Self {
+        self.start_barrier = Some(start_barrier);
+        self
+    }
+
+    pub fn with_task_group(mut self, task_group: TaskGroup, task_idx: usize) -> Self {
+        self.task_group = Some((task_group, task_idx));
+        self
+    }
 }
 
-pub fn with_task_group_blocking<T>(
-    task_group: crate::sync_model::task_wait::TaskGroup,
-    task_idx: usize,
-    inner: impl FnOnce() -> T,
-) -> T {
-    let res = inner();
-    sync_event(crate::sync_model::task_wait::TaskCompleted(
-        task_group, task_idx,
-    ));
-    res
-}
+pub fn task<T>(task: Task, inner: impl Future<Output = T>) -> impl Future<Output = T> {
+    let Some(scheduler) = task.scheduler else {
+        return Either::Left(inner);
+    };
 
-pub async fn task<T>(name: impl AsRef<str>, inner: impl Future<Output = T>) -> T {
-    let _guard;
-    let task_id = if let Some(scheduler) = Scheduler::current() {
-        let task_id = scheduler.register_task(name.as_ref());
-        _guard = TaskFinishedGuard {
+    Either::Right(with_scheduler(scheduler.clone(), async move {
+        let task_id = scheduler.0.register_task(task.name.as_ref());
+        let _guard = TaskFinishedGuard {
             task_id,
-            scheduler: scheduler.clone(),
+            scheduler: scheduler.0.clone(),
         };
-        Some(task_id)
-    } else {
-        None
-    };
-    TaskFuture::new(inner, task_id).await
+        TaskFuture::new(
+            async {
+                if let Some(barrier) = task.start_barrier {
+                    wait_for_start_barrier(barrier).await;
+                }
+                let res = inner.await;
+                if let Some((task_group, task_idx)) = task.task_group {
+                    sync_event(crate::sync_model::task_wait::TaskCompleted(
+                        task_group, task_idx,
+                    ));
+                }
+                res
+            },
+            Some(task_id),
+        )
+        .await
+    }))
 }
 
-pub fn task_blocking<T>(name: impl AsRef<str>, inner: impl FnOnce() -> T) -> T {
-    let _guard;
-    if let Some(scheduler) = Scheduler::current() {
-        let task_id = scheduler.register_task(name.as_ref());
-        _guard = (
-            TaskFinishedGuard {
-                task_id,
-                scheduler: scheduler.clone(),
-            },
-            CurrentTaskIdGuard::install(task_id),
-        );
+pub fn task_blocking<T>(task: Task, inner: impl FnOnce() -> T) -> T {
+    let Some(scheduler) = task.scheduler else {
+        return inner();
     };
-    inner()
+
+    let task_id = scheduler.0.register_task(task.name.as_ref());
+    let _guard = (
+        TaskFinishedGuard {
+            task_id,
+            scheduler: scheduler.0.clone(),
+        },
+        scheduler.0.set_current(),
+        CurrentTaskIdGuard::install(task_id),
+    );
+
+    if let Some(barrier) = task.start_barrier {
+        block_on(wait_for_start_barrier(barrier));
+    }
+    let res = inner();
+
+    if let Some((task_group, task_idx)) = task.task_group {
+        sync_event(crate::sync_model::task_wait::TaskCompleted(
+            task_group, task_idx,
+        ));
+    }
+    res
 }
 
 struct TaskFinishedGuard {

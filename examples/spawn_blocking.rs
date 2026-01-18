@@ -5,8 +5,8 @@ use racedet::{
     driver::Driver,
     sync_model::task_wait::{NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
     task::{
-        execution_point, execution_point_blocking, new_start_barrier, sync_event, task,
-        task_blocking, with_start_barrier_blocking, with_task_group_blocking,
+        StartBarrier, Task, execution_point, execution_point_blocking, sync_event, task,
+        task_blocking,
     },
     with_scheduler_blocking_opt,
 };
@@ -26,14 +26,14 @@ async fn main() {
 }
 
 async fn foo() {
-    task("bar", bar()).await;
+    task(Task::new("bar"), bar()).await;
 }
 
 async fn bar() {
     execution_point("before spawn").await;
 
     // task_join means that the current task is waiting for nested tasks and should not be scheduled in of itself (but other tasks should be scheduled instead)
-    let barrier = new_start_barrier(2);
+    let barrier = StartBarrier::new(2);
     let task_group = TaskGroup::new();
     sync_event(NewTaskGroup(task_group));
     let task_a: tokio::task::JoinHandle<_> = spawn_blocking({
@@ -42,14 +42,15 @@ async fn bar() {
         move || {
             tracing::debug!("in spawn_blocking 1");
             with_scheduler_blocking_opt(scheduler.as_ref(), || {
-                task_blocking("spawn a", || {
-                    with_task_group_blocking(task_group, 0, || {
-                        with_start_barrier_blocking(barrier.clone(), || {
-                            execution_point_blocking("a1");
-                            execution_point_blocking("a2");
-                        })
-                    })
-                })
+                task_blocking(
+                    Task::new("spawn a")
+                        .with_task_group(task_group, 0)
+                        .with_start_barrier(barrier.clone()),
+                    || {
+                        execution_point_blocking("a1");
+                        execution_point_blocking("a2");
+                    },
+                )
             })
         }
     });
@@ -59,14 +60,15 @@ async fn bar() {
         move || {
             tracing::debug!("in spawn_blocking 2");
             with_scheduler_blocking_opt(scheduler.as_ref(), || {
-                task_blocking("spawn b", || {
-                    with_task_group_blocking(task_group, 1, || {
-                        with_start_barrier_blocking(barrier.clone(), || {
-                            execution_point_blocking("b1");
-                            execution_point_blocking("b2");
-                        })
-                    })
-                })
+                task_blocking(
+                    Task::new("spawn b")
+                        .with_task_group(task_group, 1)
+                        .with_start_barrier(barrier.clone()),
+                    || {
+                        execution_point_blocking("b1");
+                        execution_point_blocking("b2");
+                    },
+                )
             })
         }
     });
