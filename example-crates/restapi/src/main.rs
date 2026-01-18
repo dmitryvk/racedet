@@ -59,11 +59,10 @@ async fn main() {
          curl http://localhost:3000/reset -X POST && \\
       curl http://localhost:3000/increment -H \
          'x-racedet: 2-foo-r1' & \\
-      curl http://localhost:3000/increment -H 'x-racedet: \
-         2-foo-r2' & \\
+      curl http://localhost:3000/increment -H 'x-racedet: 2-foo-r2' \
+         & \\
       wait; \\
-      curl http://localhost:3000/retrieve_racedet_trace/foo \
-         -X POST
+      curl http://localhost:3000/retrieve_racedet_trace/foo -X POST
 
     To replay execution, add the following arguments to curl invocations:
       add -H 'x-racedet-replay: <...>'
@@ -312,7 +311,8 @@ impl SchedulerRegistry {
                         }
 
                         tracing::info!(
-                            "racedet scheduler {id} complete. trace:\n{}\nreplay:\n-H 'x-racedet-replay: {}'\n",
+                            "racedet scheduler {id} complete. trace:\n{}\nreplay:\n-H \
+                             'x-racedet-replay: {}'\n",
                             scheduler.get_trace(),
                             scheduler.get_replay(),
                         );

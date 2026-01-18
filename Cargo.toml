@@ -11,7 +11,11 @@ edition = "2024"
 members = [
     ".",
     "example-crates/restapi",
+    "example-crates/test-examples",
 ]
+
+[features]
+active = []
 
 [dependencies]
 futures-core = { workspace = true }
@@ -24,10 +28,6 @@ tokio = { workspace = true, features = ["sync", "rt", "time"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
-futures = { version = "0.3.31" }
-timeout-tracing = "0.1.2"
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-tracing-subscriber = { version = "0.3.20" }
 
 [workspace.dependencies]
 futures-core = { version = "0.3.31", default-features = false }
