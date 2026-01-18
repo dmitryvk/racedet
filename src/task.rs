@@ -142,7 +142,6 @@ pub fn task<T>(task: Task, inner: impl Future<Output = T>) -> impl Future<Output
         return Either::Left(inner);
     };
 
-    let task_id = scheduler.0.register_task(task.name.as_ref());
     Either::Right(TaskFuture::new(
         async move {
             if let Some(barrier) = task.start_barrier {
@@ -156,7 +155,7 @@ pub fn task<T>(task: Task, inner: impl Future<Output = T>) -> impl Future<Output
             }
             res
         },
-        task_id,
+        task.name,
         scheduler.0,
     ))
 }
@@ -208,23 +207,21 @@ pin_project! {
     pub(crate) struct TaskFuture<Fut> {
         #[pin]
         inner: Fut,
-        task_id: TaskId,
+        task_name: Cow<'static, str>,
+        task_id: Option<TaskId>,
         scheduler: Arc<Scheduler>,
-        finished_guard: TaskFinishedGuard,
+        finished_guard: Option<TaskFinishedGuard>,
     }
 }
 
 impl<Fut> TaskFuture<Fut> {
-    pub(crate) fn new(inner: Fut, task_id: TaskId, scheduler: Arc<Scheduler>) -> Self {
-        let finished_guard = TaskFinishedGuard {
-            task_id,
-            scheduler: scheduler.clone(),
-        };
+    pub(crate) fn new(inner: Fut, task_name: Cow<'static, str>, scheduler: Arc<Scheduler>) -> Self {
         Self {
             inner,
-            task_id,
+            task_name,
+            task_id: None,
             scheduler,
-            finished_guard,
+            finished_guard: None,
         }
     }
 }
@@ -234,7 +231,18 @@ impl<Fut: Future> Future for TaskFuture<Fut> {
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let _task_id_guard = CurrentTaskIdGuard::install(*this.task_id);
+        let task_id = if let Some(task_id) = this.task_id {
+            *task_id
+        } else {
+            let task_id = this.scheduler.register_task(&this.task_name);
+            *this.task_id = Some(task_id);
+            *this.finished_guard = Some(TaskFinishedGuard {
+                task_id,
+                scheduler: this.scheduler.clone(),
+            });
+            task_id
+        };
+        let _task_id_guard = CurrentTaskIdGuard::install(task_id);
         let _scheduler_guard = this.scheduler.set_current();
 
         this.inner.poll(cx)
