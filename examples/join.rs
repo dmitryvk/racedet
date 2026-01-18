@@ -1,6 +1,6 @@
-use std::{pin::pin, time::Duration};
+use std::time::Duration;
 
-use futures::{FutureExt, select};
+use futures::FutureExt;
 use racedet::{
     driver::Driver,
     sync_model::task_wait::{NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
@@ -8,7 +8,7 @@ use racedet::{
         execution_point, new_start_barrier, sync_event, task, with_start_barrier, with_task_group,
     },
 };
-use tokio::{join, time::sleep};
+use tokio::{join, select, time::sleep};
 
 #[tokio::main]
 async fn main() {
@@ -67,27 +67,21 @@ async fn bar() {
     tracing::debug!("sync_event starting select");
     sync_event(TaskWaitAnyN(task_group, 1));
     tracing::debug!("starting select");
-    let mut task_c = pin!(
-        task(
-            "c",
-            with_task_group(
-                task_group,
-                0,
-                with_start_barrier(barrier.clone(), execution_point("c")),
-            ),
-        )
-        .fuse()
+    let task_c = task(
+        "c",
+        with_task_group(
+            task_group,
+            0,
+            with_start_barrier(barrier.clone(), execution_point("c")),
+        ),
     );
-    let mut task_d = pin!(
-        task(
-            "d",
-            with_task_group(
-                task_group,
-                1,
-                with_start_barrier(barrier.clone(), execution_point("d")),
-            ),
-        )
-        .fuse()
+    let task_d = task(
+        "d",
+        with_task_group(
+            task_group,
+            1,
+            with_start_barrier(barrier.clone(), execution_point("d")),
+        ),
     );
     select! {
         _ = task_c => {},
