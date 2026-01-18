@@ -1,0 +1,17 @@
+[package]
+name = "restapi"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+axum = { version = "0.8.7" }
+futures = { version = "0.3.31" }
+racedet = { workspace = true }
+serde = { version = "1.0.228", features = ["derive"] }
+thiserror = "2.0.17"
+timeout-tracing = "0.1.2"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio-util = "0.7.17"
+tower = "0.5.2"
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3.20" }

@@ -27,8 +27,8 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     // use the following script to execute the example:
-    // curl http://localhost:3000/reset -X POST && curl http://localhost:3000/increment -H 'x-concchecker: 2-foo-r1' & curl http://localhost:3000/increment -H 'x-concchecker: 2-foo-r2' & wait; curl http://localhost:3000/retrieve_concchecker_trace/foo -X POST
-    // add -H 'x-conchecker-replay: <...>'
+    // curl http://localhost:3000/reset -X POST && curl http://localhost:3000/increment -H 'x-racedet: 2-foo-r1' & curl http://localhost:3000/increment -H 'x-racedet: 2-foo-r2' & wait; curl http://localhost:3000/retrieve_racedet_trace/foo -X POST
+    // add -H 'x-racedet-replay: <...>'
 
     let scheduler_registry = SchedulerRegistry::new();
     // build our application with a route
@@ -37,13 +37,13 @@ async fn main() {
         .route("/", get(root))
         .route("/reset", post(reset_counter))
         .route(
-            "/retrieve_concchecker_trace/{trace_id}",
-            post(retrieve_concchecker_trace),
+            "/retrieve_racedet_trace/{trace_id}",
+            post(retrieve_racedet_trace),
         )
         .route("/increment", get(increment))
         // `POST /users` goes to `create_user`
         .route("/users", post(create_user))
-        .layer(ConcCheckerLayer::new(scheduler_registry.clone()))
+        .layer(RacedetLayer::new(scheduler_registry.clone()))
         .with_state(Arc::new(AppState {
             var: AtomicU64::new(0),
             scheduler_registry,
@@ -51,6 +51,24 @@ async fn main() {
 
     // run our app with hyper, listening globally on port 3000
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    println!(
+        "
+    Started http server at http://0.0.0.0:3000.
+    Use the following command for testing:
+      \
+         curl http://localhost:3000/reset -X POST && \\
+      curl http://localhost:3000/increment -H \
+         'x-racedet: 2-foo-r1' & \\
+      curl http://localhost:3000/increment -H 'x-racedet: \
+         2-foo-r2' & \\
+      wait; \\
+      curl http://localhost:3000/retrieve_racedet_trace/foo \
+         -X POST
+
+    To replay execution, add the following arguments to curl invocations:
+      add -H 'x-racedet-replay: <...>'
+    "
+    );
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -65,7 +83,7 @@ async fn reset_counter(State(state): State<Arc<AppState>>) {
 }
 
 // basic handler that responds with a static string
-async fn retrieve_concchecker_trace(
+async fn retrieve_racedet_trace(
     State(state): State<Arc<AppState>>,
     Path(scheduler_id): Path<String>,
 ) -> Result<String, (StatusCode, String)> {
@@ -74,7 +92,7 @@ async fn retrieve_concchecker_trace(
     {
         cancellation_token.cancel();
         Ok(format!(
-            "{}\n{}",
+            "{}\n-H 'x-racedet-replay: {}'\n",
             scheduler.get_trace(),
             scheduler.get_replay()
         ))
@@ -131,13 +149,13 @@ struct User {
 }
 
 #[derive(Clone)]
-struct ConcCheckerLayer {
+struct RacedetLayer {
     schedulers: Arc<SchedulerRegistry>,
 }
 
-impl ConcCheckerLayer {
+impl RacedetLayer {
     fn new(scheduler_registry: Arc<SchedulerRegistry>) -> Self {
-        ConcCheckerLayer {
+        RacedetLayer {
             schedulers: scheduler_registry,
         }
     }
@@ -155,11 +173,11 @@ impl SchedulerRegistry {
     }
 }
 
-impl<S> Layer<S> for ConcCheckerLayer {
-    type Service = ConcCheckerService<S>;
+impl<S> Layer<S> for RacedetLayer {
+    type Service = RacedetService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        ConcCheckerService {
+        RacedetService {
             schedulers: self.schedulers.clone(),
             inner,
         }
@@ -167,12 +185,12 @@ impl<S> Layer<S> for ConcCheckerLayer {
 }
 
 #[derive(Clone)]
-struct ConcCheckerService<S> {
+struct RacedetService<S> {
     schedulers: Arc<SchedulerRegistry>,
     inner: S,
 }
 
-impl<S> Service<Request> for ConcCheckerService<S>
+impl<S> Service<Request> for RacedetService<S>
 where
     S: Service<Request, Response = Response> + Send + 'static,
     S::Future: Send + 'static,
@@ -193,13 +211,13 @@ where
     fn call(&mut self, req: Request) -> Self::Future {
         let future = if let Some(header) = req
             .headers()
-            .get("x-concchecker")
+            .get("x-racedet")
             .and_then(|h| h.to_str().ok())
-            .and_then(|h| RequestConccheckerHeader::from_str(h).ok())
+            .and_then(|h| RequestRacedetHeader::from_str(h).ok())
         {
             let replay = req
                 .headers()
-                .get("x-concchecker-replay")
+                .get("x-racedet-replay")
                 .and_then(|h| h.to_str().ok());
             let (scheduler, barrier, _) = self.schedulers.get_or_insert(
                 header.scheduler_id,
@@ -223,28 +241,24 @@ where
     }
 }
 
-struct RequestConccheckerHeader {
+struct RequestRacedetHeader {
     concurrent_task_count: usize,
     scheduler_id: String,
     task_id: String,
 }
 
-impl FromStr for RequestConccheckerHeader {
-    type Err = RequestConccheckerHeaderParseError;
+impl FromStr for RequestRacedetHeader {
+    type Err = RequestRacedetHeaderParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (n, s) = s
-            .split_once('-')
-            .ok_or(RequestConccheckerHeaderParseError)?;
-        let n: usize = n.parse().map_err(|_| RequestConccheckerHeaderParseError)?;
-        let (scheduler_id, task_id) = s
-            .split_once('-')
-            .ok_or(RequestConccheckerHeaderParseError)?;
+        let (n, s) = s.split_once('-').ok_or(RequestRacedetHeaderParseError)?;
+        let n: usize = n.parse().map_err(|_| RequestRacedetHeaderParseError)?;
+        let (scheduler_id, task_id) = s.split_once('-').ok_or(RequestRacedetHeaderParseError)?;
         if scheduler_id.is_empty() || !scheduler_id.chars().all(char::is_alphanumeric) {
-            return Err(RequestConccheckerHeaderParseError);
+            return Err(RequestRacedetHeaderParseError);
         }
         if task_id.is_empty() || !task_id.chars().all(char::is_alphanumeric) {
-            return Err(RequestConccheckerHeaderParseError);
+            return Err(RequestRacedetHeaderParseError);
         }
         Ok(Self {
             concurrent_task_count: n,
@@ -255,8 +269,8 @@ impl FromStr for RequestConccheckerHeader {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("error parsing concchecker header")]
-struct RequestConccheckerHeaderParseError;
+#[error("error parsing racedet header")]
+struct RequestRacedetHeaderParseError;
 
 impl SchedulerRegistry {
     fn take_scheduler(&self, id: &str) -> Option<(SchedulerHandle, CancellationToken)> {
@@ -298,7 +312,7 @@ impl SchedulerRegistry {
                         }
 
                         tracing::info!(
-                            "conchecker scheduler {id} complete. trace:\n{}\nreplay:\n{}",
+                            "racedet scheduler {id} complete. trace:\n{}\nreplay:\n-H 'x-racedet-replay: {}'\n",
                             scheduler.get_trace(),
                             scheduler.get_replay(),
                         );
