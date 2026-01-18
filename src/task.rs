@@ -1,12 +1,12 @@
-use std::{borrow::Cow, num::NonZeroU64, sync::Arc};
+use std::{borrow::Cow, cell::RefCell, num::NonZeroU64, sync::Arc, task::Poll};
 
 use futures_executor::block_on;
 use futures_util::future::Either;
+use pin_project_lite::pin_project;
 use tokio::sync::Barrier;
 
 use crate::{
     SchedulerHandle, current_scheduler,
-    executor::{self, CurrentTaskIdGuard, TaskFuture},
     scheduler::Scheduler,
     sync_model::{
         SyncEvent, SyncInitEvent,
@@ -37,7 +37,7 @@ impl std::fmt::Display for TaskId {
 
 pub fn sync_event<T: SyncEvent>(event: T) {
     if let Some(scheduler) = Scheduler::current()
-        && let Some(task_id) = executor::current_task()
+        && let Some(task_id) = current_task()
         && let Err(err) = scheduler.on_sync_event(task_id, event)
     {
         panic!("invalid sync event: {err}");
@@ -54,7 +54,7 @@ pub fn sync_init_event<T: SyncInitEvent>(event: T) {
 
 pub async fn execution_point(name: &str) {
     if let Some(scheduler) = Scheduler::current()
-        && let Some(task_id) = executor::current_task()
+        && let Some(task_id) = current_task()
     {
         scheduler.on_reached_point(task_id, name).await;
     }
@@ -62,7 +62,7 @@ pub async fn execution_point(name: &str) {
 
 pub async fn execution_point_with_event<T: SyncEvent>(name: &str, event: T) {
     if let Some(scheduler) = Scheduler::current()
-        && let Some(task_id) = executor::current_task()
+        && let Some(task_id) = current_task()
         && let Err(err) = scheduler
             .on_reached_point_with_event(task_id, name, event)
             .await
@@ -204,5 +204,54 @@ struct TaskFinishedGuard {
 impl Drop for TaskFinishedGuard {
     fn drop(&mut self) {
         self.scheduler.on_task_finished(self.task_id);
+    }
+}
+
+thread_local! {
+    static CURRENT_TASK: RefCell<Option<TaskId>> = const { RefCell::new(None) };
+}
+
+pin_project! {
+    pub(crate) struct TaskFuture<Fut> {
+        #[pin]
+        inner: Fut,
+        task_id: Option<TaskId>,
+    }
+}
+
+impl<Fut> TaskFuture<Fut> {
+    pub(crate) fn new(inner: Fut, task_id: Option<TaskId>) -> Self {
+        Self { inner, task_id }
+    }
+}
+
+impl<Fut: Future> Future for TaskFuture<Fut> {
+    type Output = Fut::Output;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let _guard = this.task_id.map(CurrentTaskIdGuard::install);
+        this.inner.poll(cx)
+    }
+}
+
+pub(crate) fn current_task() -> Option<TaskId> {
+    CURRENT_TASK.with_borrow(|t| *t)
+}
+
+pub(crate) struct CurrentTaskIdGuard {
+    old_value: Option<TaskId>,
+}
+
+impl CurrentTaskIdGuard {
+    pub(crate) fn install(task_id: TaskId) -> Self {
+        let old_value = CURRENT_TASK.replace(Some(task_id));
+        Self { old_value }
+    }
+}
+
+impl Drop for CurrentTaskIdGuard {
+    fn drop(&mut self) {
+        CURRENT_TASK.with_borrow_mut(|v| *v = self.old_value);
     }
 }

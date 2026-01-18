@@ -5,10 +5,8 @@ use pin_project_lite::pin_project;
 use crate::{
     full_trace::TraceView,
     scheduler::{RandomTaskSelector, Scheduler},
-    task::StartBarrier,
 };
 pub mod driver;
-mod executor;
 pub mod full_trace;
 mod replay_trace;
 mod replay_trace_parsed;
@@ -52,10 +50,6 @@ impl SchedulerHandle {
     pub fn get_replay(&self) -> ReplayTrace {
         crate::replay_trace::ReplayTrace::from_trace(self.0.string_pool(), &self.0.get_trace())
             .to_parsed()
-    }
-
-    pub fn new_start_barrier(&self, task_count: usize) -> StartBarrier {
-        with_scheduler_blocking(self, || StartBarrier::new(task_count))
     }
 }
 
