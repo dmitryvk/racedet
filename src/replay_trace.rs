@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use crate::{
     parsed_replay_trace::ReplayTrace,
-    scheduler::TaskStableId,
+    scheduler::active::TaskStableId,
     string_pool::{StringIdx, StringPool},
     trace::{TraceView, TraceViewItem},
 };

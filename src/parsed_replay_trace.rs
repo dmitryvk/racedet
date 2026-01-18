@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 
-use crate::scheduler::TaskStableId;
+use crate::scheduler::active::TaskStableId;
 
 #[derive(Debug, Clone)]
 pub struct ReplayTrace {

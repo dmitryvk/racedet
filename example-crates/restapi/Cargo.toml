@@ -3,6 +3,9 @@ name = "restapi"
 version.workspace = true
 edition.workspace = true
 
+[features]
+racedet_active = ["racedet/active"]
+
 [dependencies]
 axum = { version = "0.8.7" }
 futures = { version = "0.3.31" }

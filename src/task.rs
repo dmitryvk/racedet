@@ -1,41 +1,43 @@
-use std::{borrow::Cow, cell::RefCell, num::NonZeroU64, sync::Arc, task::Poll};
+use std::borrow::Cow;
+#[cfg(feature = "active")]
+use std::{num::NonZeroU64, sync::Arc};
 
-use futures_executor::block_on;
-use futures_util::future::Either;
-use pin_project_lite::pin_project;
+#[cfg(feature = "active")]
 use tokio::sync::Barrier;
 
 use crate::{
-    scheduler::{Scheduler, SchedulerHandle, current_scheduler},
-    sync::{
-        SyncEvent, SyncInitEvent,
-        start_barrier::{BarrierId, NewBarrier},
-        task_wait::TaskGroup,
-    },
+    scheduler::SchedulerHandle,
+    sync::{SyncEvent, SyncInitEvent, task_wait::TaskGroup},
+};
+#[cfg(feature = "active")]
+use crate::{
+    scheduler::{active::Scheduler, current_scheduler},
+    sync::start_barrier::{BarrierId, NewBarrier},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TaskId(NonZeroU64);
-
-impl TaskId {
-    pub(crate) fn new(id: NonZeroU64) -> Self {
-        Self(id)
-    }
-
-    pub(crate) fn get(self) -> NonZeroU64 {
-        self.0
-    }
-}
+pub struct TaskId(#[cfg(feature = "active")] NonZeroU64);
 
 impl std::fmt::Display for TaskId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        #[cfg(not(feature = "active"))]
+        {
+            _ = f;
+            Ok(())
+        }
+        #[cfg(feature = "active")]
         self.0.fmt(f)
     }
 }
 
 pub fn sync_event<T: SyncEvent>(event: T) {
+    #[cfg(not(feature = "active"))]
+    {
+        _ = event;
+    }
+    #[cfg(feature = "active")]
     if let Some(scheduler) = Scheduler::current()
-        && let Some(task_id) = current_task()
+        && let Some(task_id) = active::current_task()
         && let Err(err) = scheduler.on_sync_event(task_id, event)
     {
         panic!("invalid sync event: {err}");
@@ -43,45 +45,65 @@ pub fn sync_event<T: SyncEvent>(event: T) {
 }
 
 pub fn sync_init_event<T: SyncInitEvent>(event: T) {
-    if let Some(scheduler) = Scheduler::current()
-        && let Err(err) = scheduler.on_sync_init_event(event)
+    #[cfg(not(feature = "active"))]
     {
-        panic!("invalid sync event: {err}");
+        _ = event;
     }
+    #[cfg(feature = "active")]
+    active::sync_init_event_inner(event);
 }
 
-pub async fn execution_point(name: &str) {
-    if let Some(scheduler) = Scheduler::current()
-        && let Some(task_id) = current_task()
+pub fn execution_point(name: &str) -> impl Future<Output = ()> {
+    #[cfg(not(feature = "active"))]
     {
-        scheduler.on_reached_point(task_id, name).await;
+        _ = name;
+        std::future::ready(())
     }
+    #[cfg(feature = "active")]
+    active::execution_point_inner(name)
 }
 
-pub async fn execution_point_with_event<T: SyncEvent>(name: &str, event: T) {
-    if let Some(scheduler) = Scheduler::current()
-        && let Some(task_id) = current_task()
-        && let Err(err) = scheduler
-            .on_reached_point_with_event(task_id, name, event)
-            .await
+pub fn execution_point_with_event<T: SyncEvent>(name: &str, event: T) -> impl Future<Output = ()> {
+    #[cfg(not(feature = "active"))]
     {
-        panic!("invalid sync event: {err}");
+        _ = name;
+        _ = event;
+        std::future::ready(())
     }
+    #[cfg(feature = "active")]
+    active::execution_point_with_event_inner(name, event)
 }
 
 pub fn execution_point_with_event_blocking<T: SyncEvent>(name: &str, event: T) {
-    block_on(execution_point_with_event(name, event));
+    #[cfg(not(feature = "active"))]
+    {
+        _ = name;
+        _ = event;
+    }
+    #[cfg(feature = "active")]
+    active::execution_point_with_event_blocking_inner(name, event);
 }
 
 pub fn execution_point_blocking(name: &str) {
-    block_on(execution_point(name));
+    #[cfg(not(feature = "active"))]
+    {
+        _ = name;
+    }
+    #[cfg(feature = "active")]
+    active::execution_point_blocking_inner(name);
 }
 
 #[derive(Clone)]
-pub struct StartBarrier(Option<Arc<Barrier>>);
+pub struct StartBarrier(#[cfg(feature = "active")] Option<Arc<Barrier>>);
 
 impl StartBarrier {
     pub fn new(task_count: usize) -> Self {
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_count;
+            Self()
+        }
+        #[cfg(feature = "active")]
         if current_scheduler().is_some() {
             let start_barrier = Arc::new(Barrier::new(task_count));
             sync_init_event(NewBarrier {
@@ -95,27 +117,25 @@ impl StartBarrier {
     }
 }
 
-async fn wait_for_start_barrier(barrier: StartBarrier) {
-    use crate::sync::start_barrier::{BarrierId, CompletedBarrierWait, WaitingForBarrier};
-    if let StartBarrier(Some(barrier)) = barrier {
-        tracing::debug!("sync_event barrier waiting");
-        execution_point_with_event("barrier", WaitingForBarrier(BarrierId::new(&barrier))).await;
-        tracing::debug!("barrier waiting");
-        barrier.wait().await;
-        tracing::debug!("barrier wait complete");
-        sync_event(CompletedBarrierWait(BarrierId::new(&barrier)));
-    }
-}
-
 pub struct Task {
+    #[cfg(feature = "active")]
     name: Cow<'static, str>,
+    #[cfg(feature = "active")]
     scheduler: Option<SchedulerHandle>,
+    #[cfg(feature = "active")]
     task_group: Option<(TaskGroup, usize)>,
+    #[cfg(feature = "active")]
     start_barrier: Option<StartBarrier>,
 }
 
 impl Task {
-    pub fn new(name: impl Into<Cow<'static, str>>) -> Task {
+    pub fn new(name: impl Into<Cow<'static, str>>) -> Self {
+        #[cfg(not(feature = "active"))]
+        {
+            _ = name;
+            Self {}
+        }
+        #[cfg(feature = "active")]
         Self {
             name: name.into(),
             scheduler: current_scheduler(),
@@ -125,155 +145,299 @@ impl Task {
     }
 
     pub fn with_scheduler(mut self, scheduler: Option<SchedulerHandle>) -> Self {
-        self.scheduler = scheduler;
+        #[cfg(not(feature = "active"))]
+        {
+            _ = &mut self;
+            _ = scheduler;
+        }
+        #[cfg(feature = "active")]
+        {
+            self.scheduler = scheduler;
+        }
         self
     }
 
     pub fn with_start_barrier(mut self, start_barrier: StartBarrier) -> Self {
-        self.start_barrier = Some(start_barrier);
+        #[cfg(not(feature = "active"))]
+        {
+            _ = &mut self;
+            _ = start_barrier;
+        }
+        #[cfg(feature = "active")]
+        {
+            self.start_barrier = Some(start_barrier);
+        }
         self
     }
 
     pub fn with_task_group(mut self, task_group: TaskGroup, task_idx: usize) -> Self {
-        self.task_group = Some((task_group, task_idx));
+        #[cfg(not(feature = "active"))]
+        {
+            _ = &mut self;
+            _ = task_group;
+            _ = task_idx;
+        }
+        #[cfg(feature = "active")]
+        {
+            self.task_group = Some((task_group, task_idx));
+        }
         self
     }
 }
 
 pub fn task<T>(task: Task, inner: impl Future<Output = T>) -> impl Future<Output = T> {
-    let Some(scheduler) = task.scheduler else {
-        return Either::Left(inner);
-    };
-
-    Either::Right(TaskFuture::new(
-        async move {
-            if let Some((task_group, task_idx)) = task.task_group {
-                sync_event(crate::sync::task_wait::TaskStarted(task_group, task_idx));
-            }
-            if let Some(barrier) = task.start_barrier {
-                wait_for_start_barrier(barrier).await;
-            }
-            let res = inner.await;
-            if let Some((task_group, task_idx)) = task.task_group {
-                sync_event(crate::sync::task_wait::TaskCompleted(task_group, task_idx));
-            }
-            res
-        },
-        task.name,
-        scheduler.0,
-    ))
+    #[cfg(not(feature = "active"))]
+    {
+        _ = task;
+        inner
+    }
+    #[cfg(feature = "active")]
+    {
+        active::task_inner(task, inner)
+    }
 }
 
 pub fn task_blocking<T>(task: Task, inner: impl FnOnce() -> T) -> T {
-    let Some(scheduler) = task.scheduler else {
-        return inner();
+    #[cfg(not(feature = "active"))]
+    {
+        _ = task;
+        inner()
+    }
+    #[cfg(feature = "active")]
+    {
+        active::task_blocking_inner(task, inner)
+    }
+}
+
+#[cfg(feature = "active")]
+mod active {
+    use std::{borrow::Cow, cell::RefCell, num::NonZeroU64, sync::Arc, task::Poll};
+
+    use futures_executor::block_on;
+    use futures_util::future::Either;
+    use pin_project_lite::pin_project;
+
+    use super::{StartBarrier, Task, TaskId};
+    use crate::{
+        scheduler::active::Scheduler,
+        sync::{SyncEvent, SyncInitEvent},
     };
 
-    let task_id = scheduler.0.register_task(task.name.as_ref());
-    let _guard = (
-        TaskFinishedGuard {
-            task_id,
-            scheduler: scheduler.0.clone(),
-        },
-        scheduler.0.set_current(),
-        CurrentTaskIdGuard::install(task_id),
-    );
+    impl TaskId {
+        pub(crate) fn new(id: NonZeroU64) -> Self {
+            Self(id)
+        }
 
-    if let Some((task_group, task_idx)) = task.task_group {
-        sync_event(crate::sync::task_wait::TaskStarted(task_group, task_idx));
-    }
-
-    if let Some(barrier) = task.start_barrier {
-        block_on(wait_for_start_barrier(barrier));
-    }
-    let res = inner();
-
-    if let Some((task_group, task_idx)) = task.task_group {
-        sync_event(crate::sync::task_wait::TaskCompleted(task_group, task_idx));
-    }
-    res
-}
-
-struct TaskFinishedGuard {
-    task_id: TaskId,
-    scheduler: Arc<Scheduler>,
-}
-
-impl Drop for TaskFinishedGuard {
-    fn drop(&mut self) {
-        self.scheduler.on_task_finished(self.task_id);
-    }
-}
-
-thread_local! {
-    static CURRENT_TASK: RefCell<Option<TaskId>> = const { RefCell::new(None) };
-}
-
-pin_project! {
-    pub(crate) struct TaskFuture<Fut> {
-        #[pin]
-        inner: Fut,
-        task_name: Cow<'static, str>,
-        task_id: Option<TaskId>,
-        scheduler: Arc<Scheduler>,
-        finished_guard: Option<TaskFinishedGuard>,
-    }
-}
-
-impl<Fut> TaskFuture<Fut> {
-    pub(crate) fn new(inner: Fut, task_name: Cow<'static, str>, scheduler: Arc<Scheduler>) -> Self {
-        Self {
-            inner,
-            task_name,
-            task_id: None,
-            scheduler,
-            finished_guard: None,
+        pub(crate) fn get(self) -> NonZeroU64 {
+            self.0
         }
     }
-}
 
-impl<Fut: Future> Future for TaskFuture<Fut> {
-    type Output = Fut::Output;
+    pub(super) fn sync_event_inner<T: SyncEvent>(event: T) {
+        if let Some(scheduler) = Scheduler::current()
+            && let Some(task_id) = current_task()
+            && let Err(err) = scheduler.on_sync_event(task_id, event)
+        {
+            panic!("invalid sync event: {err}");
+        }
+    }
 
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-        let task_id = if let Some(task_id) = this.task_id {
-            *task_id
-        } else {
-            // task id should be registered only when future was polled, as scheduler considers all registered tasks as running
-            let task_id = this.scheduler.register_task(this.task_name);
-            *this.task_id = Some(task_id);
-            *this.finished_guard = Some(TaskFinishedGuard {
-                task_id,
-                scheduler: this.scheduler.clone(),
-            });
-            task_id
+    pub(super) fn sync_init_event_inner<T: SyncInitEvent>(event: T) {
+        if let Some(scheduler) = Scheduler::current()
+            && let Err(err) = scheduler.on_sync_init_event(event)
+        {
+            panic!("invalid sync event: {err}");
+        }
+    }
+
+    pub(super) async fn execution_point_inner(name: &str) {
+        if let Some(scheduler) = Scheduler::current()
+            && let Some(task_id) = current_task()
+        {
+            scheduler.on_reached_point(task_id, name).await;
+        }
+    }
+
+    pub(super) async fn execution_point_with_event_inner<T: SyncEvent>(name: &str, event: T) {
+        if let Some(scheduler) = Scheduler::current()
+            && let Some(task_id) = current_task()
+            && let Err(err) = scheduler
+                .on_reached_point_with_event(task_id, name, event)
+                .await
+        {
+            panic!("invalid sync event: {err}");
+        }
+    }
+
+    pub(super) fn execution_point_with_event_blocking_inner<T: SyncEvent>(name: &str, event: T) {
+        block_on(execution_point_with_event_inner(name, event));
+    }
+
+    pub(super) fn execution_point_blocking_inner(name: &str) {
+        block_on(execution_point_inner(name));
+    }
+
+    pub(super) fn task_inner<T>(
+        task: Task,
+        inner: impl Future<Output = T>,
+    ) -> impl Future<Output = T> {
+        let Some(scheduler) = task.scheduler else {
+            return Either::Left(inner);
         };
-        let _task_id_guard = CurrentTaskIdGuard::install(task_id);
-        let _scheduler_guard = this.scheduler.set_current();
 
-        this.inner.poll(cx)
+        Either::Right(TaskFuture::new(
+            async move {
+                if let Some((task_group, task_idx)) = task.task_group {
+                    sync_event_inner(crate::sync::task_wait::TaskStarted(task_group, task_idx));
+                }
+                if let Some(barrier) = task.start_barrier {
+                    wait_for_start_barrier(barrier).await;
+                }
+                let res = inner.await;
+                if let Some((task_group, task_idx)) = task.task_group {
+                    sync_event_inner(crate::sync::task_wait::TaskCompleted(task_group, task_idx));
+                }
+                res
+            },
+            task.name,
+            scheduler.0,
+        ))
     }
-}
 
-pub(crate) fn current_task() -> Option<TaskId> {
-    CURRENT_TASK.with_borrow(|t| *t)
-}
+    pub(super) fn task_blocking_inner<T>(task: Task, inner: impl FnOnce() -> T) -> T {
+        let Some(scheduler) = task.scheduler else {
+            return inner();
+        };
 
-pub(crate) struct CurrentTaskIdGuard {
-    old_value: Option<TaskId>,
-}
+        let task_id = scheduler.0.register_task(task.name.as_ref());
+        let _guard = (
+            TaskFinishedGuard {
+                task_id,
+                scheduler: scheduler.0.clone(),
+            },
+            scheduler.0.set_current(),
+            CurrentTaskIdGuard::install(task_id),
+        );
 
-impl CurrentTaskIdGuard {
-    pub(crate) fn install(task_id: TaskId) -> Self {
-        let old_value = CURRENT_TASK.replace(Some(task_id));
+        if let Some((task_group, task_idx)) = task.task_group {
+            sync_event_inner(crate::sync::task_wait::TaskStarted(task_group, task_idx));
+        }
 
-        Self { old_value }
+        if let Some(barrier) = task.start_barrier {
+            block_on(wait_for_start_barrier(barrier));
+        }
+        let res = inner();
+
+        if let Some((task_group, task_idx)) = task.task_group {
+            sync_event_inner(crate::sync::task_wait::TaskCompleted(task_group, task_idx));
+        }
+        res
     }
-}
 
-impl Drop for CurrentTaskIdGuard {
-    fn drop(&mut self) {
-        CURRENT_TASK.with_borrow_mut(|v| *v = self.old_value);
+    async fn wait_for_start_barrier(barrier: StartBarrier) {
+        use crate::sync::start_barrier::{BarrierId, CompletedBarrierWait, WaitingForBarrier};
+        if let StartBarrier(Some(barrier)) = barrier {
+            tracing::debug!("sync_event barrier waiting");
+            execution_point_with_event_inner(
+                "barrier",
+                WaitingForBarrier(BarrierId::new(&barrier)),
+            )
+            .await;
+            tracing::debug!("barrier waiting");
+            barrier.wait().await;
+            tracing::debug!("barrier wait complete");
+            sync_event_inner(CompletedBarrierWait(BarrierId::new(&barrier)));
+        }
+    }
+
+    struct TaskFinishedGuard {
+        task_id: TaskId,
+        scheduler: Arc<Scheduler>,
+    }
+
+    impl Drop for TaskFinishedGuard {
+        fn drop(&mut self) {
+            self.scheduler.on_task_finished(self.task_id);
+        }
+    }
+
+    thread_local! {
+        static CURRENT_TASK: RefCell<Option<TaskId>> = const { RefCell::new(None) };
+    }
+
+    pin_project! {
+        pub(crate) struct TaskFuture<Fut> {
+            #[pin]
+            inner: Fut,
+            task_name: Cow<'static, str>,
+            task_id: Option<TaskId>,
+            scheduler: Arc<Scheduler>,
+            finished_guard: Option<TaskFinishedGuard>,
+        }
+    }
+
+    impl<Fut> TaskFuture<Fut> {
+        pub(crate) fn new(
+            inner: Fut,
+            task_name: Cow<'static, str>,
+            scheduler: Arc<Scheduler>,
+        ) -> Self {
+            Self {
+                inner,
+                task_name,
+                task_id: None,
+                scheduler,
+                finished_guard: None,
+            }
+        }
+    }
+
+    impl<Fut: Future> Future for TaskFuture<Fut> {
+        type Output = Fut::Output;
+
+        fn poll(
+            self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> Poll<Self::Output> {
+            let this = self.project();
+            let task_id = if let Some(task_id) = this.task_id {
+                *task_id
+            } else {
+                // task id should be registered only when future was polled, as scheduler considers all registered tasks as running
+                let task_id = this.scheduler.register_task(this.task_name);
+                *this.task_id = Some(task_id);
+                *this.finished_guard = Some(TaskFinishedGuard {
+                    task_id,
+                    scheduler: this.scheduler.clone(),
+                });
+                task_id
+            };
+            let _task_id_guard = CurrentTaskIdGuard::install(task_id);
+            let _scheduler_guard = this.scheduler.set_current();
+
+            this.inner.poll(cx)
+        }
+    }
+
+    pub(crate) fn current_task() -> Option<TaskId> {
+        CURRENT_TASK.with_borrow(|t| *t)
+    }
+
+    pub(crate) struct CurrentTaskIdGuard {
+        old_value: Option<TaskId>,
+    }
+
+    impl CurrentTaskIdGuard {
+        pub(crate) fn install(task_id: TaskId) -> Self {
+            let old_value = CURRENT_TASK.replace(Some(task_id));
+
+            Self { old_value }
+        }
+    }
+
+    impl Drop for CurrentTaskIdGuard {
+        fn drop(&mut self) {
+            CURRENT_TASK.with_borrow_mut(|v| *v = self.old_value);
+        }
     }
 }

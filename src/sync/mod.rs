@@ -14,71 +14,17 @@
 //! `SyncEvent` implementations are backed by `SyncModel` which tracks the necessary state
 //! (e.g., which tasks are holding locks or trying to acquire them).
 
-use std::{
-    any::{Any, TypeId},
-    collections::{HashMap, HashSet},
-};
+use std::{any::Any, collections::HashSet};
 
 use crate::task::TaskId;
 
 pub mod join;
 pub mod mutex;
 pub mod rwlock;
+#[cfg(feature = "active")]
 pub(crate) mod start_barrier;
 pub mod task_wait;
 pub mod watch;
-
-pub(crate) struct SyncModelRegistry {
-    sync_models: HashMap<TypeId, Box<dyn DynSyncModel>>,
-}
-
-impl SyncModelRegistry {
-    #[allow(clippy::new_without_default)]
-    pub(crate) fn new() -> Self {
-        Self {
-            sync_models: HashMap::new(),
-        }
-    }
-
-    fn get_sync_model_mut<T: SyncModel>(&mut self) -> &mut T {
-        let dyn_model = self
-            .sync_models
-            .entry(TypeId::of::<T>())
-            .or_insert_with(|| Box::new(T::default()));
-        let any: &mut dyn Any = dyn_model.as_mut();
-        any.downcast_mut().expect("used the matching TypeId")
-    }
-
-    fn iter_models(&self) -> impl Iterator<Item = &dyn DynSyncModel> {
-        self.sync_models.values().map(|model| model.as_ref())
-    }
-
-    pub(crate) fn on_notified<TEvent: SyncEvent>(
-        &mut self,
-        task_id: TaskId,
-        event: TEvent,
-    ) -> Result<NotificationOutcome, BadSync> {
-        let sync_model = self.get_sync_model_mut::<TEvent::Model>();
-        sync_model.on_event(task_id, event)
-    }
-
-    pub(crate) fn on_init_event<TEvent: SyncInitEvent>(
-        &mut self,
-        event: TEvent,
-    ) -> Result<NotificationOutcome, BadSync> {
-        let sync_model = self.get_sync_model_mut::<TEvent::Model>();
-        sync_model.on_init_event(event)
-    }
-
-    pub(crate) fn task_progress_dependencies(&self, task_id: TaskId) -> TaskProgressDependencies {
-        self.iter_models()
-            .map(|model| model.task_progress_dependencies(task_id))
-            .reduce(TaskProgressDependencies::merge)
-            .unwrap_or_else(|| TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new(),
-            })
-    }
-}
 
 pub trait DynSyncModel: Any + Send + Sync + 'static {
     fn task_progress_dependencies(&self, task_id: TaskId) -> TaskProgressDependencies;
@@ -134,26 +80,6 @@ pub enum TaskProgressDependencies {
     Blocked,
 }
 
-impl TaskProgressDependencies {
-    fn merge(self, other: Self) -> Self {
-        match (self, other) {
-            (
-                Self::Ready {
-                    need_to_run: mut t1,
-                },
-                Self::Ready { need_to_run: t2 },
-            ) => Self::Ready {
-                need_to_run: {
-                    t1.extend(t2);
-                    t1
-                },
-            },
-            (Self::Blocked, Self::Ready { .. } | Self::Blocked)
-            | (Self::Ready { .. }, Self::Blocked) => Self::Blocked,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct BadSync(String);
 
@@ -165,294 +91,383 @@ impl std::fmt::Display for BadSync {
 
 impl std::error::Error for BadSync {}
 
-#[cfg(test)]
-mod tests {
-    use std::num::NonZeroU64;
+#[cfg(feature = "active")]
+pub(crate) mod active {
+    use std::{
+        any::{Any, TypeId},
+        collections::{HashMap, HashSet},
+    };
 
-    use super::*;
+    use super::{
+        BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, ProcessSyncInitEvent,
+        SyncEvent, SyncInitEvent, SyncModel, TaskProgressDependencies,
+    };
+    use crate::task::TaskId;
 
-    #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
-    struct LockId(u32);
-
-    #[derive(Default)]
-    struct LockModel {
-        locks_held_by: HashMap<LockId, TaskId>,
-        locks_waiting: HashMap<TaskId, LockId>,
+    pub(crate) struct SyncModelRegistry {
+        sync_models: HashMap<TypeId, Box<dyn DynSyncModel>>,
     }
 
-    struct TakingLock(LockId);
-    impl SyncEvent for TakingLock {
-        type Model = LockModel;
-    }
-    struct AbortTakingLock(LockId);
-    impl SyncEvent for AbortTakingLock {
-        type Model = LockModel;
-    }
-    struct LockTaken(LockId);
-    impl SyncEvent for LockTaken {
-        type Model = LockModel;
-    }
-    struct LockReleased(LockId);
-    impl SyncEvent for LockReleased {
-        type Model = LockModel;
-    }
+    impl SyncModelRegistry {
+        #[allow(clippy::new_without_default)]
+        pub(crate) fn new() -> Self {
+            Self {
+                sync_models: HashMap::new(),
+            }
+        }
 
-    impl SyncModel for LockModel {}
-    impl DynSyncModel for LockModel {
-        fn task_progress_dependencies(&self, task_id: TaskId) -> TaskProgressDependencies {
-            let Some(lock_id) = self.locks_waiting.get(&task_id).cloned() else {
-                return TaskProgressDependencies::Ready {
+        fn get_sync_model_mut<T: SyncModel>(&mut self) -> &mut T {
+            let dyn_model = self
+                .sync_models
+                .entry(TypeId::of::<T>())
+                .or_insert_with(|| Box::new(T::default()));
+            let any: &mut dyn Any = dyn_model.as_mut();
+            any.downcast_mut().expect("used the matching TypeId")
+        }
+
+        fn iter_models(&self) -> impl Iterator<Item = &dyn DynSyncModel> {
+            self.sync_models.values().map(|model| model.as_ref())
+        }
+
+        pub(crate) fn on_notified<TEvent: SyncEvent>(
+            &mut self,
+            task_id: TaskId,
+            event: TEvent,
+        ) -> Result<NotificationOutcome, BadSync> {
+            let sync_model = self.get_sync_model_mut::<TEvent::Model>();
+            sync_model.on_event(task_id, event)
+        }
+
+        pub(crate) fn on_init_event<TEvent: SyncInitEvent>(
+            &mut self,
+            event: TEvent,
+        ) -> Result<NotificationOutcome, BadSync> {
+            let sync_model = self.get_sync_model_mut::<TEvent::Model>();
+            sync_model.on_init_event(event)
+        }
+
+        pub(crate) fn task_progress_dependencies(
+            &self,
+            task_id: TaskId,
+        ) -> TaskProgressDependencies {
+            self.iter_models()
+                .map(|model| model.task_progress_dependencies(task_id))
+                .reduce(TaskProgressDependencies::merge)
+                .unwrap_or_else(|| TaskProgressDependencies::Ready {
                     need_to_run: HashSet::new(),
+                })
+        }
+    }
+
+    impl TaskProgressDependencies {
+        fn merge(self, other: Self) -> Self {
+            match (self, other) {
+                (
+                    Self::Ready {
+                        need_to_run: mut t1,
+                    },
+                    Self::Ready { need_to_run: t2 },
+                ) => Self::Ready {
+                    need_to_run: {
+                        t1.extend(t2);
+                        t1
+                    },
+                },
+                (Self::Blocked, Self::Ready { .. } | Self::Blocked)
+                | (Self::Ready { .. }, Self::Blocked) => Self::Blocked,
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::num::NonZeroU64;
+
+        use super::*;
+
+        #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+        struct LockId(u32);
+
+        #[derive(Default)]
+        struct LockModel {
+            locks_held_by: HashMap<LockId, TaskId>,
+            locks_waiting: HashMap<TaskId, LockId>,
+        }
+
+        struct TakingLock(LockId);
+        impl SyncEvent for TakingLock {
+            type Model = LockModel;
+        }
+        struct AbortTakingLock(LockId);
+        impl SyncEvent for AbortTakingLock {
+            type Model = LockModel;
+        }
+        struct LockTaken(LockId);
+        impl SyncEvent for LockTaken {
+            type Model = LockModel;
+        }
+        struct LockReleased(LockId);
+        impl SyncEvent for LockReleased {
+            type Model = LockModel;
+        }
+
+        impl SyncModel for LockModel {}
+        impl DynSyncModel for LockModel {
+            fn task_progress_dependencies(&self, task_id: TaskId) -> TaskProgressDependencies {
+                let Some(lock_id) = self.locks_waiting.get(&task_id).cloned() else {
+                    return TaskProgressDependencies::Ready {
+                        need_to_run: HashSet::new(),
+                    };
                 };
-            };
-            let Some(holding_task_id) = self.locks_held_by.get(&lock_id).cloned() else {
-                return TaskProgressDependencies::Ready {
-                    need_to_run: HashSet::new(),
+                let Some(holding_task_id) = self.locks_held_by.get(&lock_id).cloned() else {
+                    return TaskProgressDependencies::Ready {
+                        need_to_run: HashSet::new(),
+                    };
                 };
-            };
 
-            TaskProgressDependencies::Ready {
-                need_to_run: [holding_task_id].into_iter().collect(),
+                TaskProgressDependencies::Ready {
+                    need_to_run: [holding_task_id].into_iter().collect(),
+                }
             }
         }
-    }
 
-    impl ProcessSyncEvent<TakingLock> for LockModel {
-        fn on_event(
-            &mut self,
-            task_id: TaskId,
-            TakingLock(lock_id): TakingLock,
-        ) -> Result<NotificationOutcome, BadSync> {
-            if self.locks_waiting.contains_key(&task_id) {
-                return Err(BadSync("task already waiting for a lock".to_string()));
+        impl ProcessSyncEvent<TakingLock> for LockModel {
+            fn on_event(
+                &mut self,
+                task_id: TaskId,
+                TakingLock(lock_id): TakingLock,
+            ) -> Result<NotificationOutcome, BadSync> {
+                if self.locks_waiting.contains_key(&task_id) {
+                    return Err(BadSync("task already waiting for a lock".to_string()));
+                }
+                if self.locks_held_by.get(&lock_id) == Some(&task_id) {
+                    return Err(BadSync("the task is already holding the lock".to_string()));
+                }
+                self.locks_waiting.insert(task_id, lock_id);
+                Ok(NotificationOutcome::Acknowledged)
             }
-            if self.locks_held_by.get(&lock_id) == Some(&task_id) {
-                return Err(BadSync("the task is already holding the lock".to_string()));
-            }
-            self.locks_waiting.insert(task_id, lock_id);
-            Ok(NotificationOutcome::Acknowledged)
         }
-    }
-    impl ProcessSyncEvent<AbortTakingLock> for LockModel {
-        fn on_event(
-            &mut self,
-            task_id: TaskId,
-            AbortTakingLock(lock_id): AbortTakingLock,
-        ) -> Result<NotificationOutcome, BadSync> {
-            if self.locks_waiting.remove(&task_id) != Some(lock_id) {
-                return Err(BadSync("the task is not waiting for the lock".to_string()));
+        impl ProcessSyncEvent<AbortTakingLock> for LockModel {
+            fn on_event(
+                &mut self,
+                task_id: TaskId,
+                AbortTakingLock(lock_id): AbortTakingLock,
+            ) -> Result<NotificationOutcome, BadSync> {
+                if self.locks_waiting.remove(&task_id) != Some(lock_id) {
+                    return Err(BadSync("the task is not waiting for the lock".to_string()));
+                }
+                Ok(NotificationOutcome::Acknowledged)
             }
-            Ok(NotificationOutcome::Acknowledged)
         }
-    }
-    impl ProcessSyncEvent<LockTaken> for LockModel {
-        fn on_event(
-            &mut self,
-            task_id: TaskId,
-            LockTaken(lock_id): LockTaken,
-        ) -> Result<NotificationOutcome, BadSync> {
-            if self.locks_held_by.contains_key(&lock_id) {
-                return Err(BadSync("lock is already taken".to_string()));
+        impl ProcessSyncEvent<LockTaken> for LockModel {
+            fn on_event(
+                &mut self,
+                task_id: TaskId,
+                LockTaken(lock_id): LockTaken,
+            ) -> Result<NotificationOutcome, BadSync> {
+                if self.locks_held_by.contains_key(&lock_id) {
+                    return Err(BadSync("lock is already taken".to_string()));
+                }
+                if self.locks_waiting.remove(&task_id) != Some(lock_id) {
+                    return Err(BadSync("task is not waiting for a lock".to_string()));
+                }
+                self.locks_held_by.insert(lock_id, task_id);
+                Ok(NotificationOutcome::Acknowledged)
             }
-            if self.locks_waiting.remove(&task_id) != Some(lock_id) {
-                return Err(BadSync("task is not waiting for a lock".to_string()));
-            }
-            self.locks_held_by.insert(lock_id, task_id);
-            Ok(NotificationOutcome::Acknowledged)
         }
-    }
-    impl ProcessSyncEvent<LockReleased> for LockModel {
-        fn on_event(
-            &mut self,
-            task_id: TaskId,
-            LockReleased(lock_id): LockReleased,
-        ) -> Result<NotificationOutcome, BadSync> {
-            if self.locks_held_by.remove(&lock_id) != Some(task_id) {
-                return Err(BadSync("the lock was not taken by the task".to_string()));
+        impl ProcessSyncEvent<LockReleased> for LockModel {
+            fn on_event(
+                &mut self,
+                task_id: TaskId,
+                LockReleased(lock_id): LockReleased,
+            ) -> Result<NotificationOutcome, BadSync> {
+                if self.locks_held_by.remove(&lock_id) != Some(task_id) {
+                    return Err(BadSync("the lock was not taken by the task".to_string()));
+                }
+                Ok(NotificationOutcome::Acknowledged)
             }
-            Ok(NotificationOutcome::Acknowledged)
         }
-    }
 
-    #[test]
-    fn test_lock_model() {
-        let mut registry = SyncModelRegistry::new();
-        let task_1 = TaskId::new(NonZeroU64::new(1).unwrap());
-        let task_2 = TaskId::new(NonZeroU64::new(2).unwrap());
-        let lock_id = LockId(1);
-        assert_eq!(
-            registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new()
-            }
-        );
-        assert_eq!(
-            registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new()
-            }
-        );
+        #[test]
+        fn test_lock_model() {
+            let mut registry = SyncModelRegistry::new();
+            let task_1 = TaskId::new(NonZeroU64::new(1).unwrap());
+            let task_2 = TaskId::new(NonZeroU64::new(2).unwrap());
+            let lock_id = LockId(1);
+            assert_eq!(
+                registry.task_progress_dependencies(task_1),
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new()
+                }
+            );
+            assert_eq!(
+                registry.task_progress_dependencies(task_2),
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new()
+                }
+            );
 
-        assert_eq!(
-            registry.on_notified(task_1, TakingLock(lock_id)).unwrap(),
-            NotificationOutcome::Acknowledged
-        );
-        registry
-            .on_notified(task_1, TakingLock(LockId(2)))
-            .unwrap_err();
-        assert_eq!(
-            registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new()
-            }
-        );
-        assert_eq!(
-            registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new()
-            }
-        );
-
-        assert_eq!(
-            registry.on_notified(task_1, LockTaken(lock_id)).unwrap(),
-            NotificationOutcome::Acknowledged
-        );
-        assert_eq!(
-            registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new()
-            },
-        );
-        assert_eq!(
-            registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new()
-            }
-        );
-
-        assert_eq!(
-            registry.on_notified(task_2, TakingLock(lock_id)).unwrap(),
-            NotificationOutcome::Acknowledged
-        );
-        assert_eq!(
-            registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new()
-            },
-        );
-        assert_eq!(
-            registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Ready {
-                need_to_run: [task_1].into_iter().collect()
-            },
-        );
-
-        let err = registry
-            .on_notified(task_2, LockTaken(lock_id))
-            .unwrap_err();
-        assert!(err.0.contains("already taken"), "returned error: {err}");
-        assert_eq!(
-            registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new()
-            },
-        );
-        assert_eq!(
-            registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Ready {
-                need_to_run: [task_1].into_iter().collect()
-            },
-        );
-
-        assert_eq!(
-            registry.on_notified(task_1, LockReleased(lock_id)).unwrap(),
-            NotificationOutcome::Acknowledged
-        );
-        assert_eq!(
-            registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new()
-            },
-        );
-        assert_eq!(
-            registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new()
-            },
-        );
-
-        assert_eq!(
-            registry.on_notified(task_2, LockTaken(lock_id)).unwrap(),
-            NotificationOutcome::Acknowledged
-        );
-        assert_eq!(
-            registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new()
-            },
-        );
-        assert_eq!(
-            registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new()
-            },
-        );
-
-        assert_eq!(
-            registry.on_notified(task_2, LockReleased(lock_id)).unwrap(),
-            NotificationOutcome::Acknowledged
-        );
-        assert_eq!(
-            registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new()
-            },
-        );
-        assert_eq!(
-            registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new()
-            },
-        );
-
-        assert_eq!(
-            registry.on_notified(task_2, TakingLock(lock_id)).unwrap(),
-            NotificationOutcome::Acknowledged
-        );
-        assert_eq!(
+            assert_eq!(
+                registry.on_notified(task_1, TakingLock(lock_id)).unwrap(),
+                NotificationOutcome::Acknowledged
+            );
             registry
-                .on_notified(task_2, AbortTakingLock(lock_id))
-                .unwrap(),
-            NotificationOutcome::Acknowledged
-        );
-        assert_eq!(
-            registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new()
-            }
-        );
-        assert_eq!(
-            registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new()
-            }
-        );
+                .on_notified(task_1, TakingLock(LockId(2)))
+                .unwrap_err();
+            assert_eq!(
+                registry.task_progress_dependencies(task_1),
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new()
+                }
+            );
+            assert_eq!(
+                registry.task_progress_dependencies(task_2),
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new()
+                }
+            );
 
-        assert_eq!(
-            registry.on_notified(task_1, TakingLock(lock_id)).unwrap(),
-            NotificationOutcome::Acknowledged
-        );
-        assert_eq!(
-            registry.task_progress_dependencies(task_1),
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new()
-            }
-        );
-        assert_eq!(
-            registry.task_progress_dependencies(task_2),
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new()
-            }
-        );
+            assert_eq!(
+                registry.on_notified(task_1, LockTaken(lock_id)).unwrap(),
+                NotificationOutcome::Acknowledged
+            );
+            assert_eq!(
+                registry.task_progress_dependencies(task_1),
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new()
+                },
+            );
+            assert_eq!(
+                registry.task_progress_dependencies(task_2),
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new()
+                }
+            );
+
+            assert_eq!(
+                registry.on_notified(task_2, TakingLock(lock_id)).unwrap(),
+                NotificationOutcome::Acknowledged
+            );
+            assert_eq!(
+                registry.task_progress_dependencies(task_1),
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new()
+                },
+            );
+            assert_eq!(
+                registry.task_progress_dependencies(task_2),
+                TaskProgressDependencies::Ready {
+                    need_to_run: [task_1].into_iter().collect()
+                },
+            );
+
+            let err = registry
+                .on_notified(task_2, LockTaken(lock_id))
+                .unwrap_err();
+            assert!(err.0.contains("already taken"), "returned error: {err}");
+            assert_eq!(
+                registry.task_progress_dependencies(task_1),
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new()
+                },
+            );
+            assert_eq!(
+                registry.task_progress_dependencies(task_2),
+                TaskProgressDependencies::Ready {
+                    need_to_run: [task_1].into_iter().collect()
+                },
+            );
+
+            assert_eq!(
+                registry.on_notified(task_1, LockReleased(lock_id)).unwrap(),
+                NotificationOutcome::Acknowledged
+            );
+            assert_eq!(
+                registry.task_progress_dependencies(task_1),
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new()
+                },
+            );
+            assert_eq!(
+                registry.task_progress_dependencies(task_2),
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new()
+                },
+            );
+
+            assert_eq!(
+                registry.on_notified(task_2, LockTaken(lock_id)).unwrap(),
+                NotificationOutcome::Acknowledged
+            );
+            assert_eq!(
+                registry.task_progress_dependencies(task_1),
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new()
+                },
+            );
+            assert_eq!(
+                registry.task_progress_dependencies(task_2),
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new()
+                },
+            );
+
+            assert_eq!(
+                registry.on_notified(task_2, LockReleased(lock_id)).unwrap(),
+                NotificationOutcome::Acknowledged
+            );
+            assert_eq!(
+                registry.task_progress_dependencies(task_1),
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new()
+                },
+            );
+            assert_eq!(
+                registry.task_progress_dependencies(task_2),
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new()
+                },
+            );
+
+            assert_eq!(
+                registry.on_notified(task_2, TakingLock(lock_id)).unwrap(),
+                NotificationOutcome::Acknowledged
+            );
+            assert_eq!(
+                registry
+                    .on_notified(task_2, AbortTakingLock(lock_id))
+                    .unwrap(),
+                NotificationOutcome::Acknowledged
+            );
+            assert_eq!(
+                registry.task_progress_dependencies(task_1),
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new()
+                }
+            );
+            assert_eq!(
+                registry.task_progress_dependencies(task_2),
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new()
+                }
+            );
+
+            assert_eq!(
+                registry.on_notified(task_1, TakingLock(lock_id)).unwrap(),
+                NotificationOutcome::Acknowledged
+            );
+            assert_eq!(
+                registry.task_progress_dependencies(task_1),
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new()
+                }
+            );
+            assert_eq!(
+                registry.task_progress_dependencies(task_2),
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new()
+                }
+            );
+        }
     }
 }

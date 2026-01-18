@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashSet};
 
 use crate::{
-    sync::{SyncModelRegistry, TaskProgressDependencies},
+    sync::{TaskProgressDependencies, active::SyncModelRegistry},
     task::TaskId,
 };
 

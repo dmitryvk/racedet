@@ -15,19 +15,26 @@ members = [
 ]
 
 [features]
-active = []
+active = [
+    "dep:futures-core",
+    "dep:futures-executor",
+    "dep:futures-util",
+    "dep:itertools",
+    "dep:pin-project-lite",
+    "dep:rand",
+]
 
 [dependencies]
-futures-core = { workspace = true }
-futures-executor = { workspace = true, features = ["std"] }
-futures-util = { workspace = true, features = ["std"] }
-itertools = { workspace = true, features = ["use_std"] }
-pin-project-lite = { workspace = true }
-rand = { workspace = true, features = ["thread_rng"] }
+futures-core = { workspace = true, optional = true }
+futures-executor = { workspace = true, optional = true, features = ["std"] }
+futures-util = { workspace = true, optional = true, features = ["std"] }
+itertools = { workspace = true, optional = true, features = ["use_std"] }
+pin-project-lite = { workspace = true, optional = true }
+rand = { workspace = true, optional = true, features = ["thread_rng"] }
+# TODO: make tokio optional (it's a dependency of sync modules)
 tokio = { workspace = true, features = ["sync", "rt", "time"] }
+# TODO: make tracing optional (it's a dependency of sync modules)
 tracing = { workspace = true }
-
-[dev-dependencies]
 
 [workspace.dependencies]
 futures-core = { version = "0.3.31", default-features = false }
