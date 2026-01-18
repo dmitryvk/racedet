@@ -2,8 +2,8 @@ use std::{collections::HashSet, sync::Arc};
 
 use crate::{
     TaskStableId,
-    full_trace::{TraceView, TraceViewItem},
     string_pool::{StringIdx, StringPool},
+    trace::{TraceView, TraceViewItem},
 };
 
 #[derive(Debug, Clone)]

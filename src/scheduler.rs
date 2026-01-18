@@ -11,7 +11,6 @@ use itertools::Itertools;
 
 use crate::{
     TaskStableId, TraceView,
-    full_trace::{FullTraceTaskId, TaskRef, TraceViewItem},
     replay_trace::ReplayTrace,
     scheduler::get_runnable_tasks::{
         NextSchedulerAction, TaskScheduleChoice, get_eligible_scheduler_choices,
@@ -19,6 +18,7 @@ use crate::{
     string_pool::{StringIdx, StringPool},
     sync_model::{BadSync, NotificationOutcome, SyncEvent, SyncInitEvent, SyncModelRegistry},
     task::TaskId,
+    trace::{FullTraceTaskId, TaskRef, TraceViewItem},
 };
 
 mod get_runnable_tasks;
@@ -457,7 +457,7 @@ impl Scheduler {
         &self,
         inner: &Inner,
         task_snapshot: &TraceTaskSnapshot,
-    ) -> crate::full_trace::TaskSnapshot {
+    ) -> crate::trace::TaskSnapshot {
         let task = &inner.tasks[Self::task_idx(task_snapshot.task_id)];
         let name = self
             .string_pool
@@ -468,7 +468,7 @@ impl Scheduler {
                 .get(point)
                 .expect("string pool has all strings")
         });
-        crate::full_trace::TaskSnapshot {
+        crate::trace::TaskSnapshot {
             id: task
                 .stable_id
                 .map_or(FullTraceTaskId::Unstable(task.id), FullTraceTaskId::Stable),

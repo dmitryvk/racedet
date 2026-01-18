@@ -245,7 +245,8 @@ impl<Fut: Future> Future for TaskFuture<Fut> {
         let task_id = if let Some(task_id) = this.task_id {
             *task_id
         } else {
-            let task_id = this.scheduler.register_task(&this.task_name);
+            // task id should be registered only when future was polled, as scheduler considers all registered tasks as running
+            let task_id = this.scheduler.register_task(this.task_name);
             *this.task_id = Some(task_id);
             *this.finished_guard = Some(TaskFinishedGuard {
                 task_id,

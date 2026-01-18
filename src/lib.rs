@@ -2,20 +2,18 @@ use std::{num::NonZeroU64, sync::Arc, task::Poll};
 
 use pin_project_lite::pin_project;
 
-use crate::{
-    full_trace::TraceView,
-    scheduler::{RandomTaskSelector, Scheduler},
-};
+use crate::scheduler::{RandomTaskSelector, Scheduler};
 pub mod driver;
-pub mod full_trace;
 mod replay_trace;
 mod replay_trace_parsed;
 mod scheduler;
 mod string_pool;
 pub mod sync_model;
 pub mod task;
+mod trace;
 
 pub use replay_trace_parsed::{ParseError as ReplayTraceParseError, ReplayTrace};
+pub use trace::TraceView;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct TaskStableId(NonZeroU64);
