@@ -5,13 +5,15 @@ use std::{
     num::NonZeroU64,
     pin::pin,
     sync::{Arc, Mutex, MutexGuard},
+    task::Poll,
 };
 
 use itertools::Itertools;
+use pin_project_lite::pin_project;
 
 use crate::{
-    TaskStableId, TraceView,
-    replay_trace::ReplayTrace,
+    TraceView, parsed_replay_trace,
+    replay_trace::AttachedReplayTrace,
     scheduler::get_runnable_tasks::{
         NextSchedulerAction, TaskScheduleChoice, get_eligible_scheduler_choices,
     },
@@ -25,6 +27,103 @@ mod get_runnable_tasks;
 
 thread_local! {
     static CURRENT_SCHEDULER: RefCell<Option<Arc<Scheduler>>> = const { RefCell::new(None) };
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct TaskStableId(pub(crate) NonZeroU64);
+impl std::fmt::Display for TaskStableId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+#[derive(Clone)]
+pub struct SchedulerHandle(pub(crate) Arc<Scheduler>);
+pub fn new_scheduler(
+    replay: Option<&parsed_replay_trace::ReplayTrace>,
+) -> (SchedulerHandle, impl Future<Output = ()> + use<>) {
+    let scheduler = SchedulerHandle(Scheduler::new(
+        replay,
+        TaskSelector::Random(RandomTaskSelector::new()),
+    ));
+    let control_fut = scheduler.clone().run_control_loop();
+    (scheduler, control_fut)
+}
+
+pub fn current_scheduler() -> Option<SchedulerHandle> {
+    Scheduler::current().map(SchedulerHandle)
+}
+
+impl SchedulerHandle {
+    async fn run_control_loop(self) {
+        self.0.run_control_loop().await;
+    }
+
+    pub fn get_trace(&self) -> TraceView {
+        self.0.get_trace()
+    }
+
+    pub fn get_replay(&self) -> parsed_replay_trace::ReplayTrace {
+        crate::replay_trace::AttachedReplayTrace::from_trace(
+            self.0.string_pool(),
+            &self.0.get_trace(),
+        )
+        .to_parsed()
+    }
+}
+
+pub fn with_scheduler<Fut>(scheduler: SchedulerHandle, inner: Fut) -> WithScheduler<Fut> {
+    WithScheduler {
+        scheduler: Some(scheduler.0),
+        inner,
+    }
+}
+
+pub fn with_scheduler_opt<Fut>(
+    scheduler: Option<SchedulerHandle>,
+    inner: Fut,
+) -> WithScheduler<Fut> {
+    WithScheduler {
+        scheduler: scheduler.map(|handle| handle.0),
+        inner,
+    }
+}
+
+pub fn with_scheduler_blocking<T>(scheduler: &SchedulerHandle, inner: impl FnOnce() -> T) -> T {
+    let _guard = scheduler.0.set_current();
+    inner()
+}
+
+pub fn with_scheduler_blocking_opt<T>(
+    scheduler: Option<&SchedulerHandle>,
+    inner: impl FnOnce() -> T,
+) -> T {
+    let _guard;
+    if let Some(scheduler) = scheduler {
+        _guard = scheduler.0.set_current();
+    }
+    inner()
+}
+
+pin_project! {
+    pub struct WithScheduler<Fut> {
+        scheduler: Option<Arc<Scheduler>>,
+        #[pin]
+        inner: Fut,
+    }
+}
+
+impl<Fut: Future> Future for WithScheduler<Fut> {
+    type Output = Fut::Output;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let _guard;
+        if let Some(scheduler) = &this.scheduler {
+            _guard = scheduler.set_current();
+        }
+        this.inner.poll(cx)
+    }
 }
 
 pub(crate) struct Scheduler {
@@ -46,7 +145,7 @@ struct Inner {
 }
 
 struct ReplayState {
-    trace: ReplayTrace,
+    trace: AttachedReplayTrace,
     next_step: usize,
 }
 
@@ -108,13 +207,13 @@ impl RandomTaskSelector {
 
 impl Scheduler {
     pub(crate) fn new(
-        replay: Option<&crate::replay_trace_parsed::ReplayTrace>,
+        replay: Option<&crate::parsed_replay_trace::ReplayTrace>,
         task_selector: TaskSelector,
     ) -> Arc<Self> {
         let string_pool = Arc::new(StringPool::new());
         let replay = replay.map(|replay| {
             tracing::debug!("replaying {replay}");
-            ReplayTrace::from_parsed(string_pool.clone(), replay)
+            AttachedReplayTrace::from_parsed(string_pool.clone(), replay)
         });
         Arc::new(Scheduler {
             string_pool,

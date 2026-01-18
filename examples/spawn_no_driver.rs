@@ -2,10 +2,10 @@ use std::{panic::AssertUnwindSafe, str::FromStr, time::Duration};
 
 use futures::FutureExt;
 use racedet::{
-    ReplayTrace, new_scheduler,
+    ReplayTrace,
+    scheduler::{new_scheduler, with_scheduler},
     sync::task_wait::{NewTaskGroup, TaskGroup, TaskSpawned, TaskWaitAnyN, TaskWaitCompleted},
     task::{StartBarrier, Task, execution_point, sync_event, task},
-    with_scheduler,
 };
 use tokio::{spawn, time::timeout};
 

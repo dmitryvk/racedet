@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 
-use crate::TaskStableId;
+use crate::scheduler::TaskStableId;
 
 #[derive(Debug, Clone)]
 pub struct ReplayTrace {
@@ -66,21 +66,21 @@ impl std::fmt::Display for ReplayTrace {
 }
 
 #[derive(Debug)]
-pub struct ParseError(&'static str);
+pub struct ReplayTraceParseError(&'static str);
 
-impl std::fmt::Display for ParseError {
+impl std::fmt::Display for ReplayTraceParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl std::error::Error for ParseError {}
+impl std::error::Error for ReplayTraceParseError {}
 
 impl FromStr for ReplayTrace {
-    type Err = ParseError;
+    type Err = ReplayTraceParseError;
 
-    fn from_str(s: &str) -> Result<Self, ParseError> {
-        let (s_steps, s_strings) = s.split_once('#').ok_or(ParseError("no #"))?;
+    fn from_str(s: &str) -> Result<Self, ReplayTraceParseError> {
+        let (s_steps, s_strings) = s.split_once('#').ok_or(ReplayTraceParseError("no #"))?;
         tracing::debug!("s_strings={s_strings}");
 
         let strings: Vec<String> = s_strings.split(',').map(|s| s.to_owned()).collect();
@@ -95,24 +95,31 @@ impl FromStr for ReplayTrace {
 }
 
 impl FromStr for ReplayStep {
-    type Err = ParseError;
-    fn from_str(s: &str) -> Result<Self, ParseError> {
-        let (s_suspended, s_resumed) = s.split_once('/').ok_or(ParseError("no /"))?;
+    type Err = ReplayTraceParseError;
+    fn from_str(s: &str) -> Result<Self, ReplayTraceParseError> {
+        let (s_suspended, s_resumed) = s.split_once('/').ok_or(ReplayTraceParseError("no /"))?;
         let mut suspended = Vec::new();
         let mut resumed = Vec::new();
         for task in s_suspended.split(',') {
             let [s_id, s_name, s_position] = task
                 .split('-')
                 .collect_array()
-                .ok_or(ParseError("wrong number of -"))?;
-            let id = TaskStableId(s_id.parse().map_err(|_| ParseError("parse task id"))?);
-            let name = u32::from_str(s_name).map_err(|_| ParseError("parse task name"))?;
-            let position =
-                u32::from_str(s_position).map_err(|_| ParseError("parse task position"))?;
+                .ok_or(ReplayTraceParseError("wrong number of -"))?;
+            let id = TaskStableId(
+                s_id.parse()
+                    .map_err(|_| ReplayTraceParseError("parse task id"))?,
+            );
+            let name =
+                u32::from_str(s_name).map_err(|_| ReplayTraceParseError("parse task name"))?;
+            let position = u32::from_str(s_position)
+                .map_err(|_| ReplayTraceParseError("parse task position"))?;
             suspended.push(SuspendedTask { id, name, position })
         }
         for task in s_resumed.split(',') {
-            let task_id = TaskStableId(task.parse().map_err(|_| ParseError("parse task id"))?);
+            let task_id = TaskStableId(
+                task.parse()
+                    .map_err(|_| ReplayTraceParseError("parse task id"))?,
+            );
             resumed.push(task_id);
         }
 

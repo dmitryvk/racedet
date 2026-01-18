@@ -7,9 +7,9 @@ use std::{
 
 use futures::FutureExt;
 use racedet::{
-    ReplayTrace, new_scheduler,
+    ReplayTrace,
+    scheduler::{new_scheduler, with_scheduler},
     task::{StartBarrier, Task, execution_point, task},
-    with_scheduler,
 };
 use timeout_tracing::{CaptureSpanAndStackTrace, timeout};
 use tokio::join;

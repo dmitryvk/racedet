@@ -6,8 +6,7 @@ use pin_project_lite::pin_project;
 use tokio::sync::Barrier;
 
 use crate::{
-    SchedulerHandle, current_scheduler,
-    scheduler::Scheduler,
+    scheduler::{Scheduler, SchedulerHandle, current_scheduler},
     sync::{
         SyncEvent, SyncInitEvent,
         start_barrier::{BarrierId, NewBarrier},

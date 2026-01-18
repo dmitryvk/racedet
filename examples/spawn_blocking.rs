@@ -1,14 +1,13 @@
 use std::time::Duration;
 
 use racedet::{
-    current_scheduler,
     driver::Driver,
+    scheduler::{current_scheduler, with_scheduler_blocking_opt},
     sync::task_wait::{NewTaskGroup, TaskGroup, TaskSpawned, TaskWaitAnyN, TaskWaitCompleted},
     task::{
         StartBarrier, Task, execution_point, execution_point_blocking, sync_event, task,
         task_blocking,
     },
-    with_scheduler_blocking_opt,
 };
 use tokio::task::spawn_blocking;
 

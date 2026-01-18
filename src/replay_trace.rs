@@ -1,13 +1,14 @@
 use std::{collections::HashSet, sync::Arc};
 
 use crate::{
-    TaskStableId,
+    parsed_replay_trace::ReplayTrace,
+    scheduler::TaskStableId,
     string_pool::{StringIdx, StringPool},
     trace::{TraceView, TraceViewItem},
 };
 
 #[derive(Debug, Clone)]
-pub(crate) struct ReplayTrace {
+pub(crate) struct AttachedReplayTrace {
     strings: Arc<StringPool>,
     steps: Vec<ReplayStep>,
 }
@@ -25,11 +26,8 @@ struct SuspendedTask {
     position: StringIdx,
 }
 
-impl ReplayTrace {
-    pub(crate) fn from_parsed(
-        string_pool: Arc<StringPool>,
-        trace: &crate::replay_trace_parsed::ReplayTrace,
-    ) -> Self {
+impl AttachedReplayTrace {
+    pub(crate) fn from_parsed(string_pool: Arc<StringPool>, trace: &ReplayTrace) -> Self {
         let string_ids: Vec<StringIdx> = trace
             .strings
             .iter()
@@ -57,16 +55,16 @@ impl ReplayTrace {
         }
     }
 
-    pub(crate) fn to_parsed(&self) -> crate::replay_trace_parsed::ReplayTrace {
+    pub(crate) fn to_parsed(&self) -> crate::parsed_replay_trace::ReplayTrace {
         let new_string_pool = StringPool::new();
         let steps = self
             .steps
             .iter()
-            .map(|s| crate::replay_trace_parsed::ReplayStep {
+            .map(|s| crate::parsed_replay_trace::ReplayStep {
                 suspended_tasks: s
                     .suspended_tasks
                     .iter()
-                    .map(|t| crate::replay_trace_parsed::SuspendedTask {
+                    .map(|t| crate::parsed_replay_trace::SuspendedTask {
                         id: t.id,
                         name: new_string_pool
                             .intern(
@@ -93,7 +91,7 @@ impl ReplayTrace {
             .iter_ordered()
             .map(|(_, s)| s.as_ref().to_owned())
             .collect::<Vec<_>>();
-        crate::replay_trace_parsed::ReplayTrace { strings, steps }
+        crate::parsed_replay_trace::ReplayTrace { strings, steps }
     }
 
     pub(crate) fn from_trace(string_pool: Arc<StringPool>, trace: &TraceView) -> Self {

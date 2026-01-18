@@ -8,7 +8,10 @@ use std::{
 use futures_util::{FutureExt, TryFutureExt};
 use tokio::time::timeout;
 
-use crate::{ReplayTrace, new_scheduler, with_scheduler};
+use crate::{
+    parsed_replay_trace::ReplayTrace,
+    scheduler::{new_scheduler, with_scheduler},
+};
 
 pub struct Driver {
     mode: RunMode,

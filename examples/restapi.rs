@@ -13,9 +13,9 @@ use axum::{
 };
 use futures::{FutureExt, future::BoxFuture};
 use racedet::{
-    ReplayTrace, SchedulerHandle, new_scheduler,
+    ReplayTrace,
+    scheduler::{SchedulerHandle, new_scheduler, with_scheduler_blocking},
     task::{StartBarrier, Task, execution_point, task},
-    with_scheduler_blocking,
 };
 use serde::{Deserialize, Serialize};
 use tokio::select;
