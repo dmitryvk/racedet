@@ -500,7 +500,16 @@ impl Scheduler {
                 .take(10)
                 .map(|t| format!(
                     "{{ id={:?}/{:?} name={} prev={:?} state={:?} }}",
-                    t.id, t.stable_id, t.name, t.prev_suspend_point, t.state
+                    t.id,
+                    t.stable_id,
+                    self.string_pool
+                        .get(t.name)
+                        .expect("string_pool contains all strings"),
+                    t.prev_suspend_point.map(|s| self
+                        .string_pool
+                        .get(s)
+                        .expect("string_pool contains all strings")),
+                    t.state,
                 ))
                 .join(", ")
         );
