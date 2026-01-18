@@ -85,14 +85,21 @@ impl SyncEvent for CompletedBarrierWait {
 
 impl ProcessSyncInitEvent<NewBarrier> for BarrierModel {
     fn on_init_event(&mut self, event: NewBarrier) -> Result<NotificationOutcome, BadSync> {
-        self.barriers.insert(
-            event.barrier,
-            BarrierState {
-                capacity: event.capacity,
-                reached: false,
-                tasks: HashSet::new(),
-            },
-        );
+        #[cfg(not(feature = "active"))]
+        {
+            _ = event;
+        }
+        #[cfg(feature = "active")]
+        {
+            self.barriers.insert(
+                event.barrier,
+                BarrierState {
+                    capacity: event.capacity,
+                    reached: false,
+                    tasks: HashSet::new(),
+                },
+            );
+        }
         Ok(NotificationOutcome::Acknowledged)
     }
 }
@@ -103,19 +110,27 @@ impl ProcessSyncEvent<WaitingForBarrier> for BarrierModel {
         task_id: TaskId,
         WaitingForBarrier(barrier_id): WaitingForBarrier,
     ) -> Result<NotificationOutcome, BadSync> {
-        tracing::debug!("barriers before waiting {barrier_id:?}: {self:?}");
-        let barrier = self
-            .barriers
-            .get_mut(&barrier_id)
-            .ok_or_else(|| BadSync("barrier not exists".to_string()))?;
-        if self.task_waiting.insert(task_id, barrier_id).is_some() {
-            return Err(BadSync("task is already waiting on a barrier".to_string()));
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_id;
+            _ = barrier_id;
         }
-        barrier.tasks.insert(task_id);
-        if !barrier.reached && barrier.tasks.len() >= barrier.capacity {
-            barrier.reached = true;
+        #[cfg(feature = "active")]
+        {
+            tracing::debug!("barriers before waiting {barrier_id:?}: {self:?}");
+            let barrier = self
+                .barriers
+                .get_mut(&barrier_id)
+                .ok_or_else(|| BadSync("barrier not exists".to_string()))?;
+            if self.task_waiting.insert(task_id, barrier_id).is_some() {
+                return Err(BadSync("task is already waiting on a barrier".to_string()));
+            }
+            barrier.tasks.insert(task_id);
+            if !barrier.reached && barrier.tasks.len() >= barrier.capacity {
+                barrier.reached = true;
+            }
+            tracing::debug!("barriers after waiting {barrier_id:?}: {self:?}");
         }
-        tracing::debug!("barriers after waiting {barrier_id:?}: {self:?}");
         Ok(NotificationOutcome::Acknowledged)
     }
 }
@@ -126,15 +141,23 @@ impl ProcessSyncEvent<AbortedWaitingForBarrier> for BarrierModel {
         task_id: TaskId,
         AbortedWaitingForBarrier(barrier_id): AbortedWaitingForBarrier,
     ) -> Result<NotificationOutcome, BadSync> {
-        let barrier = self
-            .barriers
-            .get_mut(&barrier_id)
-            .ok_or_else(|| BadSync("barrier not exists".to_string()))?;
-        barrier.tasks.remove(&task_id);
-        if barrier.tasks.is_empty() {
-            self.barriers.remove(&barrier_id);
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_id;
+            _ = barrier_id;
         }
-        self.task_waiting.remove(&task_id);
+        #[cfg(feature = "active")]
+        {
+            let barrier = self
+                .barriers
+                .get_mut(&barrier_id)
+                .ok_or_else(|| BadSync("barrier not exists".to_string()))?;
+            barrier.tasks.remove(&task_id);
+            if barrier.tasks.is_empty() {
+                self.barriers.remove(&barrier_id);
+            }
+            self.task_waiting.remove(&task_id);
+        }
         Ok(NotificationOutcome::Acknowledged)
     }
 }
@@ -145,15 +168,23 @@ impl ProcessSyncEvent<CompletedBarrierWait> for BarrierModel {
         task_id: TaskId,
         CompletedBarrierWait(barrier_id): CompletedBarrierWait,
     ) -> Result<NotificationOutcome, BadSync> {
-        let barrier = self
-            .barriers
-            .get_mut(&barrier_id)
-            .ok_or_else(|| BadSync("barrier not exists".to_string()))?;
-        barrier.tasks.remove(&task_id);
-        if barrier.tasks.is_empty() {
-            self.barriers.remove(&barrier_id);
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_id;
+            _ = barrier_id;
         }
-        self.task_waiting.remove(&task_id);
+        #[cfg(feature = "active")]
+        {
+            let barrier = self
+                .barriers
+                .get_mut(&barrier_id)
+                .ok_or_else(|| BadSync("barrier not exists".to_string()))?;
+            barrier.tasks.remove(&task_id);
+            if barrier.tasks.is_empty() {
+                self.barriers.remove(&barrier_id);
+            }
+            self.task_waiting.remove(&task_id);
+        }
         Ok(NotificationOutcome::Acknowledged)
     }
 }

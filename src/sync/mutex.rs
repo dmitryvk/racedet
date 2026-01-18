@@ -1,4 +1,6 @@
-use std::collections::{HashMap, HashSet};
+#[cfg(feature = "active")]
+use std::collections::HashMap;
+use std::collections::HashSet;
 
 use crate::{
     sync::{
@@ -9,23 +11,39 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct MutexId(String);
+pub struct MutexId(#[cfg(feature = "active")] String);
 
 impl MutexId {
-    pub fn new(id: String) -> Self {
-        Self(id)
+    pub fn new(id: impl Into<String>) -> Self {
+        #[cfg(not(feature = "active"))]
+        {
+            _ = id;
+            Self()
+        }
+        #[cfg(feature = "active")]
+        Self(id.into())
     }
 }
 
 #[derive(Default)]
 pub struct MutexModel {
+    #[cfg(feature = "active")]
     held_by: HashMap<MutexId, TaskId>,
+    #[cfg(feature = "active")]
     waiting: HashMap<TaskId, HashSet<MutexId>>,
 }
 
 impl SyncModel for MutexModel {}
 impl DynSyncModel for MutexModel {
     fn task_progress_dependencies(&self, task_id: TaskId) -> TaskProgressDependencies {
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_id;
+            TaskProgressDependencies::Ready {
+                need_to_run: HashSet::new(),
+            }
+        }
+        #[cfg(feature = "active")]
         if self.waiting.get(&task_id).is_some_and(|waiting| {
             waiting
                 .iter()
@@ -63,19 +81,27 @@ impl ProcessSyncEvent<LockingMutex> for MutexModel {
         task_id: TaskId,
         LockingMutex(lock_id): LockingMutex,
     ) -> Result<NotificationOutcome, BadSync> {
-        if self.held_by.get(&lock_id) == Some(&task_id) {
-            return Err(BadSync("the task already holds the mutex".to_string()));
-        }
-        if self
-            .waiting
-            .get(&task_id)
-            .is_some_and(|waiting| waiting.contains(&lock_id))
+        #[cfg(not(feature = "active"))]
         {
-            return Err(BadSync(
-                "the task is already waiting for the mutex".to_string(),
-            ));
+            _ = task_id;
+            _ = lock_id;
         }
-        self.waiting.entry(task_id).or_default().insert(lock_id);
+        #[cfg(feature = "active")]
+        {
+            if self.held_by.get(&lock_id) == Some(&task_id) {
+                return Err(BadSync("the task already holds the mutex".to_string()));
+            }
+            if self
+                .waiting
+                .get(&task_id)
+                .is_some_and(|waiting| waiting.contains(&lock_id))
+            {
+                return Err(BadSync(
+                    "the task is already waiting for the mutex".to_string(),
+                ));
+            }
+            self.waiting.entry(task_id).or_default().insert(lock_id);
+        }
         Ok(NotificationOutcome::Acknowledged)
     }
 }
@@ -86,15 +112,23 @@ impl ProcessSyncEvent<AbortedLockingMutex> for MutexModel {
         task_id: TaskId,
         AbortedLockingMutex(lock_id): AbortedLockingMutex,
     ) -> Result<NotificationOutcome, BadSync> {
-        let waiting = self
-            .waiting
-            .get_mut(&task_id)
-            .ok_or_else(|| BadSync("the task is not waiting for the mutex".to_string()))?;
-        if !waiting.remove(&lock_id) {
-            return Err(BadSync("the task is not waiting for the mutex".to_string()));
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_id;
+            _ = lock_id;
         }
-        if waiting.is_empty() {
-            self.waiting.remove(&task_id);
+        #[cfg(feature = "active")]
+        {
+            let waiting = self
+                .waiting
+                .get_mut(&task_id)
+                .ok_or_else(|| BadSync("the task is not waiting for the mutex".to_string()))?;
+            if !waiting.remove(&lock_id) {
+                return Err(BadSync("the task is not waiting for the mutex".to_string()));
+            }
+            if waiting.is_empty() {
+                self.waiting.remove(&task_id);
+            }
         }
         Ok(NotificationOutcome::Acknowledged)
     }
@@ -106,17 +140,25 @@ impl ProcessSyncEvent<LockedMutex> for MutexModel {
         task_id: TaskId,
         LockedMutex(lock_id): LockedMutex,
     ) -> Result<NotificationOutcome, BadSync> {
-        let waiting = self
-            .waiting
-            .get_mut(&task_id)
-            .ok_or_else(|| BadSync("the task is not waiting for the mutex".to_string()))?;
-        if !waiting.remove(&lock_id) {
-            return Err(BadSync("the task is not waiting for the mutex".to_string()));
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_id;
+            _ = lock_id;
         }
-        if waiting.is_empty() {
-            self.waiting.remove(&task_id);
+        #[cfg(feature = "active")]
+        {
+            let waiting = self
+                .waiting
+                .get_mut(&task_id)
+                .ok_or_else(|| BadSync("the task is not waiting for the mutex".to_string()))?;
+            if !waiting.remove(&lock_id) {
+                return Err(BadSync("the task is not waiting for the mutex".to_string()));
+            }
+            if waiting.is_empty() {
+                self.waiting.remove(&task_id);
+            }
+            self.held_by.insert(lock_id, task_id);
         }
-        self.held_by.insert(lock_id, task_id);
         Ok(NotificationOutcome::Acknowledged)
     }
 }
@@ -127,8 +169,16 @@ impl ProcessSyncEvent<ReleasedMutex> for MutexModel {
         task_id: TaskId,
         ReleasedMutex(lock_id): ReleasedMutex,
     ) -> Result<NotificationOutcome, BadSync> {
-        if self.held_by.remove(&lock_id) != Some(task_id) {
-            return Err(BadSync("the task was not holding the lock".to_string()));
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_id;
+            _ = lock_id;
+        }
+        #[cfg(feature = "active")]
+        {
+            if self.held_by.remove(&lock_id) != Some(task_id) {
+                return Err(BadSync("the task was not holding the lock".to_string()));
+            }
         }
         Ok(NotificationOutcome::Acknowledged)
     }

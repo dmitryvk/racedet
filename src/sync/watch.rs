@@ -1,3 +1,4 @@
+#[cfg(feature = "active")]
 use std::collections::{HashMap, HashSet};
 
 use crate::{
@@ -10,24 +11,42 @@ use crate::{
 
 #[derive(Default, Debug)]
 pub struct WatchModel {
+    #[cfg(feature = "active")]
     tasks: HashMap<TaskId, WatchId>,
+    #[cfg(feature = "active")]
     waiters: HashMap<WatchId, HashSet<TaskId>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct WatchId(usize);
+pub struct WatchId(#[cfg(feature = "active")] usize);
 
 impl WatchId {
     pub fn from_sender<T>(sender: &tokio::sync::watch::Sender<T>) -> Self {
-        let borrow = sender.borrow();
-        let addr = &*borrow as *const T as usize;
-        Self(addr)
+        #[cfg(not(feature = "active"))]
+        {
+            _ = sender;
+            Self()
+        }
+        #[cfg(feature = "active")]
+        {
+            let borrow = sender.borrow();
+            let addr = &*borrow as *const T as usize;
+            Self(addr)
+        }
     }
 
     pub fn from_receiver<T>(receiver: &tokio::sync::watch::Receiver<T>) -> Self {
-        let borrow = receiver.borrow();
-        let addr = &*borrow as *const T as usize;
-        Self(addr)
+        #[cfg(not(feature = "active"))]
+        {
+            _ = receiver;
+            Self()
+        }
+        #[cfg(feature = "active")]
+        {
+            let borrow = receiver.borrow();
+            let addr = &*borrow as *const T as usize;
+            Self(addr)
+        }
     }
 }
 
@@ -42,12 +61,20 @@ impl SyncEvent for WatchNotified {
 
 impl DynSyncModel for WatchModel {
     fn task_progress_dependencies(&self, task_id: TaskId) -> TaskProgressDependencies {
-        if self.tasks.contains_key(&task_id) {
-            tracing::debug!("task {task_id:?} is blocked {self:?}");
-            TaskProgressDependencies::Blocked
-        } else {
-            TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new(),
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_id;
+            TaskProgressDependencies::ready()
+        }
+        #[cfg(feature = "active")]
+        {
+            if self.tasks.contains_key(&task_id) {
+                tracing::debug!("task {task_id:?} is blocked {self:?}");
+                TaskProgressDependencies::Blocked
+            } else {
+                TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new(),
+                }
             }
         }
     }
@@ -60,9 +87,19 @@ impl ProcessSyncEvent<WaitingForWatchUpdate> for WatchModel {
         task_id: TaskId,
         WaitingForWatchUpdate(watch_id): WaitingForWatchUpdate,
     ) -> Result<NotificationOutcome, BadSync> {
-        tracing::debug!("WaitingForWatchUpdate task_id={task_id:?} watch_id={watch_id:?} {self:?}");
-        self.tasks.insert(task_id, watch_id);
-        self.waiters.entry(watch_id).or_default().insert(task_id);
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_id;
+            _ = watch_id;
+        }
+        #[cfg(feature = "active")]
+        {
+            tracing::debug!(
+                "WaitingForWatchUpdate task_id={task_id:?} watch_id={watch_id:?} {self:?}"
+            );
+            self.tasks.insert(task_id, watch_id);
+            self.waiters.entry(watch_id).or_default().insert(task_id);
+        }
         Ok(NotificationOutcome::ScheduleRequired)
     }
 }
@@ -73,10 +110,17 @@ impl ProcessSyncEvent<WatchNotified> for WatchModel {
         _task_id: TaskId,
         WatchNotified(watch_id): WatchNotified,
     ) -> Result<NotificationOutcome, BadSync> {
-        tracing::debug!("WatchNotified watch_id={watch_id:?} {self:?}");
-        if let Some(waiters) = self.waiters.remove(&watch_id) {
-            for task_id in waiters {
-                self.tasks.remove(&task_id);
+        #[cfg(not(feature = "active"))]
+        {
+            _ = watch_id;
+        }
+        #[cfg(feature = "active")]
+        {
+            tracing::debug!("WatchNotified watch_id={watch_id:?} {self:?}");
+            if let Some(waiters) = self.waiters.remove(&watch_id) {
+                for task_id in waiters {
+                    self.tasks.remove(&task_id);
+                }
             }
         }
         Ok(NotificationOutcome::Acknowledged)

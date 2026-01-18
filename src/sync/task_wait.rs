@@ -1,7 +1,6 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::atomic::AtomicU64,
-};
+#[cfg(feature = "active")]
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::AtomicU64;
 
 use crate::{
     sync::{
@@ -25,10 +24,13 @@ impl TaskGroup {
 
 #[derive(Default, Debug)]
 pub struct TaskWaitModel {
+    #[cfg(feature = "active")]
     task_groups: HashMap<TaskGroup, TaskGroupState>,
+    #[cfg(feature = "active")]
     task_waits: HashMap<TaskId, TaskWaitCondition>,
 }
 
+#[cfg(feature = "active")]
 #[derive(Debug)]
 struct TaskGroupState {
     completed: HashSet<TaskGroupSlotIdx>,
@@ -36,9 +38,11 @@ struct TaskGroupState {
     started: HashSet<TaskGroupSlotIdx>,
 }
 
+#[cfg(feature = "active")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct TaskGroupSlotIdx(usize);
 
+#[cfg(feature = "active")]
 #[derive(Debug)]
 enum TaskWaitCondition {
     AnyN {
@@ -55,47 +59,55 @@ impl SyncModel for TaskWaitModel {}
 
 impl DynSyncModel for TaskWaitModel {
     fn task_progress_dependencies(&self, task_id: TaskId) -> TaskProgressDependencies {
-        match self.task_waits.get(&task_id) {
-            Some(TaskWaitCondition::AnyN {
-                task_group,
-                num_tasks,
-            }) => {
-                let Some(task_group) = self.task_groups.get(task_group) else {
-                    return TaskProgressDependencies::Blocked;
-                };
-                if task_group
-                    .spawned
-                    .iter()
-                    .any(|slot| !task_group.started.contains(slot))
-                {
-                    // waiting for spawned tasks to be started
-                    return TaskProgressDependencies::Ready {
-                        need_to_run: HashSet::new(),
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_id;
+            TaskProgressDependencies::ready()
+        }
+        #[cfg(feature = "active")]
+        {
+            match self.task_waits.get(&task_id) {
+                Some(TaskWaitCondition::AnyN {
+                    task_group,
+                    num_tasks,
+                }) => {
+                    let Some(task_group) = self.task_groups.get(task_group) else {
+                        return TaskProgressDependencies::Blocked;
                     };
-                }
-                if task_group.completed.len() >= *num_tasks {
-                    TaskProgressDependencies::Ready {
-                        need_to_run: HashSet::new(),
+                    if task_group
+                        .spawned
+                        .iter()
+                        .any(|slot| !task_group.started.contains(slot))
+                    {
+                        // waiting for spawned tasks to be started
+                        return TaskProgressDependencies::Ready {
+                            need_to_run: HashSet::new(),
+                        };
                     }
-                } else {
-                    TaskProgressDependencies::Blocked
-                }
-            }
-            Some(TaskWaitCondition::Specific { task_group, slot }) => {
-                let Some(task_group) = self.task_groups.get(task_group) else {
-                    return TaskProgressDependencies::Blocked;
-                };
-                if task_group.completed.contains(slot) {
-                    TaskProgressDependencies::Ready {
-                        need_to_run: HashSet::new(),
+                    if task_group.completed.len() >= *num_tasks {
+                        TaskProgressDependencies::Ready {
+                            need_to_run: HashSet::new(),
+                        }
+                    } else {
+                        TaskProgressDependencies::Blocked
                     }
-                } else {
-                    TaskProgressDependencies::Blocked
                 }
+                Some(TaskWaitCondition::Specific { task_group, slot }) => {
+                    let Some(task_group) = self.task_groups.get(task_group) else {
+                        return TaskProgressDependencies::Blocked;
+                    };
+                    if task_group.completed.contains(slot) {
+                        TaskProgressDependencies::Ready {
+                            need_to_run: HashSet::new(),
+                        }
+                    } else {
+                        TaskProgressDependencies::Blocked
+                    }
+                }
+                None => TaskProgressDependencies::Ready {
+                    need_to_run: HashSet::new(),
+                },
             }
-            None => TaskProgressDependencies::Ready {
-                need_to_run: HashSet::new(),
-            },
         }
     }
 }
@@ -143,17 +155,25 @@ impl ProcessSyncEvent<NewTaskGroup> for TaskWaitModel {
         task_id: TaskId,
         NewTaskGroup(task_group): NewTaskGroup,
     ) -> Result<NotificationOutcome, BadSync> {
-        self.task_groups.insert(
-            task_group,
-            TaskGroupState {
-                completed: HashSet::new(),
-                spawned: HashSet::new(),
-                started: HashSet::new(),
-            },
-        );
-        tracing::debug!(
-            "task {task_id:?} registered task group {task_group:?}, new state: {self:?}"
-        );
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_id;
+            _ = task_group;
+        }
+        #[cfg(feature = "active")]
+        {
+            self.task_groups.insert(
+                task_group,
+                TaskGroupState {
+                    completed: HashSet::new(),
+                    spawned: HashSet::new(),
+                    started: HashSet::new(),
+                },
+            );
+            tracing::debug!(
+                "task {task_id:?} registered task group {task_group:?}, new state: {self:?}"
+            );
+        }
         Ok(NotificationOutcome::Acknowledged)
     }
 }
@@ -163,15 +183,22 @@ impl ProcessSyncInitEvent<NewTaskGroup> for TaskWaitModel {
         &mut self,
         NewTaskGroup(task_group): NewTaskGroup,
     ) -> Result<NotificationOutcome, BadSync> {
-        self.task_groups.insert(
-            task_group,
-            TaskGroupState {
-                completed: HashSet::new(),
-                spawned: HashSet::new(),
-                started: HashSet::new(),
-            },
-        );
-        tracing::debug!("registered task group {task_group:?}, new state: {self:?}");
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_group;
+        }
+        #[cfg(feature = "active")]
+        {
+            self.task_groups.insert(
+                task_group,
+                TaskGroupState {
+                    completed: HashSet::new(),
+                    spawned: HashSet::new(),
+                    started: HashSet::new(),
+                },
+            );
+            tracing::debug!("registered task group {task_group:?}, new state: {self:?}");
+        }
         Ok(NotificationOutcome::Acknowledged)
     }
 }
@@ -182,8 +209,18 @@ impl ProcessSyncEvent<FreeTaskGroup> for TaskWaitModel {
         task_id: TaskId,
         FreeTaskGroup(task_group): FreeTaskGroup,
     ) -> Result<NotificationOutcome, BadSync> {
-        self.task_groups.remove(&task_group);
-        tracing::debug!("task {task_id:?} removed task group {task_group:?}, new state: {self:?}");
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_id;
+            _ = task_group;
+        }
+        #[cfg(feature = "active")]
+        {
+            self.task_groups.remove(&task_group);
+            tracing::debug!(
+                "task {task_id:?} removed task group {task_group:?}, new state: {self:?}"
+            );
+        }
         Ok(NotificationOutcome::Acknowledged)
     }
 }
@@ -194,10 +231,21 @@ impl ProcessSyncEvent<TaskSpawned> for TaskWaitModel {
         task_id: TaskId,
         TaskSpawned(task_group, slot_idx): TaskSpawned,
     ) -> Result<NotificationOutcome, BadSync> {
-        if let Some(task_group) = self.task_groups.get_mut(&task_group) {
-            task_group.spawned.insert(TaskGroupSlotIdx(slot_idx));
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_id;
+            _ = task_group;
+            _ = slot_idx;
         }
-        tracing::debug!("task {task_id:?} spawned {task_group:?} {slot_idx}, new state: {self:?}");
+        #[cfg(feature = "active")]
+        {
+            if let Some(task_group) = self.task_groups.get_mut(&task_group) {
+                task_group.spawned.insert(TaskGroupSlotIdx(slot_idx));
+            }
+            tracing::debug!(
+                "task {task_id:?} spawned {task_group:?} {slot_idx}, new state: {self:?}"
+            );
+        }
         Ok(NotificationOutcome::Acknowledged)
     }
 }
@@ -208,12 +256,24 @@ impl ProcessSyncEvent<TaskStarted> for TaskWaitModel {
         task_id: TaskId,
         TaskStarted(task_group, slot_idx): TaskStarted,
     ) -> Result<NotificationOutcome, BadSync> {
-        if let Some(task_group) = self.task_groups.get_mut(&task_group) {
-            task_group.started.insert(TaskGroupSlotIdx(slot_idx));
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_id;
+            _ = task_group;
+            _ = slot_idx;
+            Ok(NotificationOutcome::Acknowledged)
         }
-        tracing::debug!("task {task_id:?} started {task_group:?} {slot_idx}, new state: {self:?}");
-        // If a task is waiting on `TaskWaitAnyN`, it might become blocked as a result of `TaskSpawned`
-        Ok(NotificationOutcome::ScheduleRequired)
+        #[cfg(feature = "active")]
+        {
+            if let Some(task_group) = self.task_groups.get_mut(&task_group) {
+                task_group.started.insert(TaskGroupSlotIdx(slot_idx));
+            }
+            tracing::debug!(
+                "task {task_id:?} started {task_group:?} {slot_idx}, new state: {self:?}"
+            );
+            // If a task is waiting on `TaskWaitAnyN`, it might become blocked as a result of `TaskSpawned`
+            Ok(NotificationOutcome::ScheduleRequired)
+        }
     }
 }
 
@@ -223,12 +283,21 @@ impl ProcessSyncEvent<TaskCompleted> for TaskWaitModel {
         task_id: TaskId,
         TaskCompleted(task_group, slot_idx): TaskCompleted,
     ) -> Result<NotificationOutcome, BadSync> {
-        if let Some(task_group) = self.task_groups.get_mut(&task_group) {
-            task_group.completed.insert(TaskGroupSlotIdx(slot_idx));
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_id;
+            _ = task_group;
+            _ = slot_idx;
         }
-        tracing::debug!(
-            "task {task_id:?} completed {task_group:?} {slot_idx}, new state: {self:?}"
-        );
+        #[cfg(feature = "active")]
+        {
+            if let Some(task_group) = self.task_groups.get_mut(&task_group) {
+                task_group.completed.insert(TaskGroupSlotIdx(slot_idx));
+            }
+            tracing::debug!(
+                "task {task_id:?} completed {task_group:?} {slot_idx}, new state: {self:?}"
+            );
+        }
         Ok(NotificationOutcome::Acknowledged)
     }
 }
@@ -239,17 +308,26 @@ impl ProcessSyncEvent<TaskWaitAnyN> for TaskWaitModel {
         task_id: TaskId,
         TaskWaitAnyN(task_group, num_tasks): TaskWaitAnyN,
     ) -> Result<NotificationOutcome, BadSync> {
-        self.task_waits.insert(
-            task_id,
-            TaskWaitCondition::AnyN {
-                task_group,
-                num_tasks,
-            },
-        );
-        tracing::debug!(
-            "task wait AnyN({task_group:?}, {num_tasks}) registered for {task_id:?}, new state: \
-             {self:?}"
-        );
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_id;
+            _ = task_group;
+            _ = num_tasks;
+        }
+        #[cfg(feature = "active")]
+        {
+            self.task_waits.insert(
+                task_id,
+                TaskWaitCondition::AnyN {
+                    task_group,
+                    num_tasks,
+                },
+            );
+            tracing::debug!(
+                "task wait AnyN({task_group:?}, {num_tasks}) registered for {task_id:?}, new \
+                 state: {self:?}"
+            );
+        }
         Ok(NotificationOutcome::ScheduleRequired)
     }
 }
@@ -260,17 +338,26 @@ impl ProcessSyncEvent<TaskWaitNth> for TaskWaitModel {
         task_id: TaskId,
         TaskWaitNth(task_group, slot_idx): TaskWaitNth,
     ) -> Result<NotificationOutcome, BadSync> {
-        self.task_waits.insert(
-            task_id,
-            TaskWaitCondition::Specific {
-                task_group,
-                slot: TaskGroupSlotIdx(slot_idx),
-            },
-        );
-        tracing::debug!(
-            "task wait Nth({task_group:?}, {slot_idx}) registered for {task_id:?}, new state: \
-             {self:?}"
-        );
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_id;
+            _ = task_group;
+            _ = slot_idx;
+        }
+        #[cfg(feature = "active")]
+        {
+            self.task_waits.insert(
+                task_id,
+                TaskWaitCondition::Specific {
+                    task_group,
+                    slot: TaskGroupSlotIdx(slot_idx),
+                },
+            );
+            tracing::debug!(
+                "task wait Nth({task_group:?}, {slot_idx}) registered for {task_id:?}, new state: \
+                 {self:?}"
+            );
+        }
         Ok(NotificationOutcome::ScheduleRequired)
     }
 }
@@ -281,8 +368,15 @@ impl ProcessSyncEvent<TaskWaitCompleted> for TaskWaitModel {
         task_id: TaskId,
         _: TaskWaitCompleted,
     ) -> Result<NotificationOutcome, BadSync> {
-        self.task_waits.remove(&task_id);
-        tracing::debug!("task wait completed for {task_id:?}, new state: {self:?}");
+        #[cfg(not(feature = "active"))]
+        {
+            _ = task_id;
+        }
+        #[cfg(feature = "active")]
+        {
+            self.task_waits.remove(&task_id);
+            tracing::debug!("task wait completed for {task_id:?}, new state: {self:?}");
+        }
         Ok(NotificationOutcome::Acknowledged)
     }
 }

@@ -80,6 +80,22 @@ pub enum TaskProgressDependencies {
     Blocked,
 }
 
+impl TaskProgressDependencies {
+    pub fn ready() -> Self {
+        Self::Ready {
+            need_to_run: HashSet::new(),
+        }
+    }
+    pub fn ready_with_others(need_to_run: impl IntoIterator<Item = TaskId>) -> Self {
+        Self::Ready {
+            need_to_run: need_to_run.into_iter().collect(),
+        }
+    }
+    pub fn blocked() -> Self {
+        Self::Blocked
+    }
+}
+
 #[derive(Debug)]
 pub struct BadSync(String);
 
