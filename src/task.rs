@@ -70,6 +70,10 @@ pub async fn execution_point_with_event<T: SyncEvent>(name: &str, event: T) {
     }
 }
 
+pub fn execution_point_with_event_blocking<T: SyncEvent>(name: &str, event: T) {
+    block_on(execution_point_with_event(name, event));
+}
+
 pub fn execution_point_blocking(name: &str) {
     block_on(execution_point(name));
 }
