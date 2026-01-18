@@ -24,7 +24,7 @@ use crate::task::TaskId;
 pub mod join;
 pub mod mutex;
 pub mod rwlock;
-pub mod start_barrier;
+pub(crate) mod start_barrier;
 pub mod task_wait;
 pub mod watch;
 

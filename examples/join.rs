@@ -3,7 +3,7 @@ use std::time::Duration;
 use futures::FutureExt;
 use racedet::{
     driver::Driver,
-    sync_model::task_wait::{NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
+    sync::task_wait::{NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
     task::{StartBarrier, Task, execution_point, sync_event, task},
 };
 use tokio::{join, select, time::sleep};

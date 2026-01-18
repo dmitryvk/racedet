@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    sync_model::{
+    sync::{
         BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
         TaskProgressDependencies,
     },

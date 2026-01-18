@@ -6,7 +6,7 @@ use std::{
 use tokio::sync::Barrier;
 
 use crate::{
-    sync_model::{
+    sync::{
         BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, ProcessSyncInitEvent,
         SyncEvent, SyncInitEvent, SyncModel, TaskProgressDependencies,
     },

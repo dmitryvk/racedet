@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use racedet::{
     driver::Driver,
-    sync_model::mutex::{LockedMutex, LockingMutex, MutexId, ReleasedMutex},
+    sync::mutex::{LockedMutex, LockingMutex, MutexId, ReleasedMutex},
     task::{StartBarrier, Task, execution_point, sync_event, task},
 };
 use tokio::{join, sync::Mutex};

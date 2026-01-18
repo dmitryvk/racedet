@@ -2,9 +2,7 @@ use std::time::Duration;
 
 use racedet::{
     driver::Driver,
-    sync_model::task_wait::{
-        NewTaskGroup, TaskGroup, TaskSpawned, TaskWaitAnyN, TaskWaitCompleted,
-    },
+    sync::task_wait::{NewTaskGroup, TaskGroup, TaskSpawned, TaskWaitAnyN, TaskWaitCompleted},
     task::{StartBarrier, Task, execution_point, sync_event, task},
 };
 use tokio::spawn;

@@ -3,9 +3,7 @@ use std::time::Duration;
 use racedet::{
     current_scheduler,
     driver::Driver,
-    sync_model::task_wait::{
-        NewTaskGroup, TaskGroup, TaskSpawned, TaskWaitAnyN, TaskWaitCompleted,
-    },
+    sync::task_wait::{NewTaskGroup, TaskGroup, TaskSpawned, TaskWaitAnyN, TaskWaitCompleted},
     task::{
         StartBarrier, Task, execution_point, execution_point_blocking, sync_event, task,
         task_blocking,

@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use racedet::{
     driver::Driver,
-    sync_model::rwlock::{LockedRwlock, LockingRwlock, ReleasedRwlock, RwlockId, RwlockMode},
+    sync::rwlock::{LockedRwlock, LockingRwlock, ReleasedRwlock, RwlockId, RwlockMode},
     task::{StartBarrier, Task, execution_point, sync_event, task},
 };
 use tokio::{join, sync::RwLock};

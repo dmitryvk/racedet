@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashSet};
 
 use crate::{
-    sync_model::{SyncModelRegistry, TaskProgressDependencies},
+    sync::{SyncModelRegistry, TaskProgressDependencies},
     task::TaskId,
 };
 
@@ -101,7 +101,7 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::sync_model::{
+    use crate::sync::{
         BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
     };
 

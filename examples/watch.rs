@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use racedet::{
     driver::Driver,
-    sync_model::watch::{WaitingForWatchUpdate, WatchId, WatchNotified},
+    sync::watch::{WaitingForWatchUpdate, WatchId, WatchNotified},
     task::{StartBarrier, Task, execution_point, sync_event, task},
 };
 use tokio::{

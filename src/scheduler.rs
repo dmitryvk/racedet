@@ -16,7 +16,7 @@ use crate::{
         NextSchedulerAction, TaskScheduleChoice, get_eligible_scheduler_choices,
     },
     string_pool::{StringIdx, StringPool},
-    sync_model::{BadSync, NotificationOutcome, SyncEvent, SyncInitEvent, SyncModelRegistry},
+    sync::{BadSync, NotificationOutcome, SyncEvent, SyncInitEvent, SyncModelRegistry},
     task::TaskId,
     trace::{FullTraceTaskId, TaskRef, TraceViewItem},
 };

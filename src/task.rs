@@ -8,7 +8,7 @@ use tokio::sync::Barrier;
 use crate::{
     SchedulerHandle, current_scheduler,
     scheduler::Scheduler,
-    sync_model::{
+    sync::{
         SyncEvent, SyncInitEvent,
         start_barrier::{BarrierId, NewBarrier},
         task_wait::TaskGroup,
@@ -93,7 +93,7 @@ impl StartBarrier {
 }
 
 async fn wait_for_start_barrier(barrier: StartBarrier) {
-    use crate::sync_model::start_barrier::{BarrierId, CompletedBarrierWait, WaitingForBarrier};
+    use crate::sync::start_barrier::{BarrierId, CompletedBarrierWait, WaitingForBarrier};
     if let StartBarrier(Some(barrier)) = barrier {
         tracing::debug!("sync_event barrier waiting");
         execution_point_with_event("barrier", WaitingForBarrier(BarrierId::new(&barrier))).await;
@@ -145,18 +145,14 @@ pub fn task<T>(task: Task, inner: impl Future<Output = T>) -> impl Future<Output
     Either::Right(TaskFuture::new(
         async move {
             if let Some((task_group, task_idx)) = task.task_group {
-                sync_event(crate::sync_model::task_wait::TaskStarted(
-                    task_group, task_idx,
-                ));
+                sync_event(crate::sync::task_wait::TaskStarted(task_group, task_idx));
             }
             if let Some(barrier) = task.start_barrier {
                 wait_for_start_barrier(barrier).await;
             }
             let res = inner.await;
             if let Some((task_group, task_idx)) = task.task_group {
-                sync_event(crate::sync_model::task_wait::TaskCompleted(
-                    task_group, task_idx,
-                ));
+                sync_event(crate::sync::task_wait::TaskCompleted(task_group, task_idx));
             }
             res
         },
@@ -181,9 +177,7 @@ pub fn task_blocking<T>(task: Task, inner: impl FnOnce() -> T) -> T {
     );
 
     if let Some((task_group, task_idx)) = task.task_group {
-        sync_event(crate::sync_model::task_wait::TaskStarted(
-            task_group, task_idx,
-        ));
+        sync_event(crate::sync::task_wait::TaskStarted(task_group, task_idx));
     }
 
     if let Some(barrier) = task.start_barrier {
@@ -192,9 +186,7 @@ pub fn task_blocking<T>(task: Task, inner: impl FnOnce() -> T) -> T {
     let res = inner();
 
     if let Some((task_group, task_idx)) = task.task_group {
-        sync_event(crate::sync_model::task_wait::TaskCompleted(
-            task_group, task_idx,
-        ));
+        sync_event(crate::sync::task_wait::TaskCompleted(task_group, task_idx));
     }
     res
 }
