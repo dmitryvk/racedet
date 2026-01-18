@@ -13,7 +13,6 @@ use crate::{
         start_barrier::{BarrierId, NewBarrier},
         task_wait::TaskGroup,
     },
-    with_scheduler,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -143,29 +142,23 @@ pub fn task<T>(task: Task, inner: impl Future<Output = T>) -> impl Future<Output
         return Either::Left(inner);
     };
 
-    Either::Right(with_scheduler(scheduler.clone(), async move {
-        let task_id = scheduler.0.register_task(task.name.as_ref());
-        let _guard = TaskFinishedGuard {
-            task_id,
-            scheduler: scheduler.0.clone(),
-        };
-        TaskFuture::new(
-            async {
-                if let Some(barrier) = task.start_barrier {
-                    wait_for_start_barrier(barrier).await;
-                }
-                let res = inner.await;
-                if let Some((task_group, task_idx)) = task.task_group {
-                    sync_event(crate::sync_model::task_wait::TaskCompleted(
-                        task_group, task_idx,
-                    ));
-                }
-                res
-            },
-            Some(task_id),
-        )
-        .await
-    }))
+    let task_id = scheduler.0.register_task(task.name.as_ref());
+    Either::Right(TaskFuture::new(
+        async move {
+            if let Some(barrier) = task.start_barrier {
+                wait_for_start_barrier(barrier).await;
+            }
+            let res = inner.await;
+            if let Some((task_group, task_idx)) = task.task_group {
+                sync_event(crate::sync_model::task_wait::TaskCompleted(
+                    task_group, task_idx,
+                ));
+            }
+            res
+        },
+        task_id,
+        scheduler.0,
+    ))
 }
 
 pub fn task_blocking<T>(task: Task, inner: impl FnOnce() -> T) -> T {
@@ -215,13 +208,24 @@ pin_project! {
     pub(crate) struct TaskFuture<Fut> {
         #[pin]
         inner: Fut,
-        task_id: Option<TaskId>,
+        task_id: TaskId,
+        scheduler: Arc<Scheduler>,
+        finished_guard: TaskFinishedGuard,
     }
 }
 
 impl<Fut> TaskFuture<Fut> {
-    pub(crate) fn new(inner: Fut, task_id: Option<TaskId>) -> Self {
-        Self { inner, task_id }
+    pub(crate) fn new(inner: Fut, task_id: TaskId, scheduler: Arc<Scheduler>) -> Self {
+        let finished_guard = TaskFinishedGuard {
+            task_id,
+            scheduler: scheduler.clone(),
+        };
+        Self {
+            inner,
+            task_id,
+            scheduler,
+            finished_guard,
+        }
     }
 }
 
@@ -230,7 +234,9 @@ impl<Fut: Future> Future for TaskFuture<Fut> {
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let _guard = this.task_id.map(CurrentTaskIdGuard::install);
+        let _task_id_guard = CurrentTaskIdGuard::install(*this.task_id);
+        let _scheduler_guard = this.scheduler.set_current();
+
         this.inner.poll(cx)
     }
 }
@@ -246,6 +252,7 @@ pub(crate) struct CurrentTaskIdGuard {
 impl CurrentTaskIdGuard {
     pub(crate) fn install(task_id: TaskId) -> Self {
         let old_value = CURRENT_TASK.replace(Some(task_id));
+
         Self { old_value }
     }
 }
