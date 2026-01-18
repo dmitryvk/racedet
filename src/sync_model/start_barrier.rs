@@ -6,11 +6,11 @@ use std::{
 use tokio::sync::Barrier;
 
 use crate::{
-    TaskId,
     sync_model::{
         BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, ProcessSyncInitEvent,
         SyncEvent, SyncInitEvent, SyncModel, TaskProgressDependencies,
     },
+    task::TaskId,
 };
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -109,9 +109,7 @@ impl ProcessSyncEvent<WaitingForBarrier> for BarrierModel {
             .get_mut(&barrier_id)
             .ok_or_else(|| BadSync("barrier not exists".to_string()))?;
         if self.task_waiting.insert(task_id, barrier_id).is_some() {
-            return Err(BadSync(
-                "task is already waiting on a barrier".to_string(),
-            ));
+            return Err(BadSync("task is already waiting on a barrier".to_string()));
         }
         barrier.tasks.insert(task_id);
         if !barrier.reached && barrier.tasks.len() >= barrier.capacity {

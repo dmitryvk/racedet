@@ -19,7 +19,7 @@ use std::{
     collections::{HashMap, HashSet},
 };
 
-use crate::TaskId;
+use crate::task::TaskId;
 
 pub mod join;
 pub mod mutex;
@@ -277,8 +277,8 @@ mod tests {
     #[test]
     fn test_lock_model() {
         let mut registry = SyncModelRegistry::new();
-        let task_1 = TaskId(NonZeroU64::new(1).unwrap());
-        let task_2 = TaskId(NonZeroU64::new(2).unwrap());
+        let task_1 = TaskId::new(NonZeroU64::new(1).unwrap());
+        let task_2 = TaskId::new(NonZeroU64::new(2).unwrap());
         let lock_id = LockId(1);
         assert_eq!(
             registry.task_progress_dependencies(task_1),

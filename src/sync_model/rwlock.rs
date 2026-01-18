@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    TaskId,
     sync_model::{
         BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
         TaskProgressDependencies,
     },
+    task::TaskId,
 };
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -103,9 +103,7 @@ impl ProcessSyncEvent<AbortedLockingRwlock> for RwlockModel {
             .get_mut(&task_id)
             .ok_or_else(|| BadSync("the task is not waiting for the mutex".to_string()))?;
         if !waiting.remove(&(lock_id, lock_mode)) {
-            return Err(BadSync(
-                "the task is not waiting for the mutex".to_string(),
-            ));
+            return Err(BadSync("the task is not waiting for the mutex".to_string()));
         }
         if waiting.is_empty() {
             self.waiting.remove(&task_id);
@@ -125,9 +123,7 @@ impl ProcessSyncEvent<LockedRwlock> for RwlockModel {
             .get_mut(&task_id)
             .ok_or_else(|| BadSync("the task is not waiting for the mutex".to_string()))?;
         if !waiting.remove(&(lock_id.clone(), lock_mode)) {
-            return Err(BadSync(
-                "the task is not waiting for the mutex".to_string(),
-            ));
+            return Err(BadSync("the task is not waiting for the mutex".to_string()));
         }
         if waiting.is_empty() {
             self.waiting.remove(&task_id);

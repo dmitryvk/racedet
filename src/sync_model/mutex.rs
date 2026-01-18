@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    TaskId,
     sync_model::{
         BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
         TaskProgressDependencies,
     },
+    task::TaskId,
 };
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -91,9 +91,7 @@ impl ProcessSyncEvent<AbortedLockingMutex> for MutexModel {
             .get_mut(&task_id)
             .ok_or_else(|| BadSync("the task is not waiting for the mutex".to_string()))?;
         if !waiting.remove(&lock_id) {
-            return Err(BadSync(
-                "the task is not waiting for the mutex".to_string(),
-            ));
+            return Err(BadSync("the task is not waiting for the mutex".to_string()));
         }
         if waiting.is_empty() {
             self.waiting.remove(&task_id);
@@ -113,9 +111,7 @@ impl ProcessSyncEvent<LockedMutex> for MutexModel {
             .get_mut(&task_id)
             .ok_or_else(|| BadSync("the task is not waiting for the mutex".to_string()))?;
         if !waiting.remove(&lock_id) {
-            return Err(BadSync(
-                "the task is not waiting for the mutex".to_string(),
-            ));
+            return Err(BadSync("the task is not waiting for the mutex".to_string()));
         }
         if waiting.is_empty() {
             self.waiting.remove(&task_id);
@@ -132,9 +128,7 @@ impl ProcessSyncEvent<ReleasedMutex> for MutexModel {
         ReleasedMutex(lock_id): ReleasedMutex,
     ) -> Result<NotificationOutcome, BadSync> {
         if self.held_by.remove(&lock_id) != Some(task_id) {
-            return Err(BadSync(
-                "the task was not holding the lock".to_string(),
-            ));
+            return Err(BadSync("the task was not holding the lock".to_string()));
         }
         Ok(NotificationOutcome::Acknowledged)
     }

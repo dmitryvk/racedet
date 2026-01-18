@@ -3,7 +3,10 @@ use std::{
     time::Duration,
 };
 
-use racedet::{driver::Driver, execution_point, new_start_barrier, task, with_start_barrier};
+use racedet::{
+    driver::Driver,
+    task::{execution_point, new_start_barrier, task, with_start_barrier},
+};
 use tokio::join;
 
 #[tokio::main]

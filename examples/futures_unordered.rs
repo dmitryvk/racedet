@@ -3,9 +3,11 @@ use std::time::Duration;
 use futures::{StreamExt, stream::FuturesUnordered};
 use racedet::{
     driver::Driver,
-    execution_point, new_start_barrier, sync_event, sync_init_event,
     sync_model::task_wait::{NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
-    task, with_start_barrier, with_task_group,
+    task::{
+        execution_point, new_start_barrier, sync_event, sync_init_event, task, with_start_barrier,
+        with_task_group,
+    },
 };
 
 #[tokio::main]

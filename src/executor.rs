@@ -2,7 +2,7 @@ use std::{cell::RefCell, task::Poll};
 
 use pin_project_lite::pin_project;
 
-use crate::TaskId;
+use crate::task::TaskId;
 
 thread_local! {
     static CURRENT_TASK: RefCell<Option<TaskId>> = const { RefCell::new(None) };

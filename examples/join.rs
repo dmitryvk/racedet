@@ -3,9 +3,10 @@ use std::{pin::pin, time::Duration};
 use futures::{FutureExt, select};
 use racedet::{
     driver::Driver,
-    execution_point, new_start_barrier, sync_event,
     sync_model::task_wait::{NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
-    task, with_start_barrier, with_task_group,
+    task::{
+        execution_point, new_start_barrier, sync_event, task, with_start_barrier, with_task_group,
+    },
 };
 use tokio::{join, time::sleep};
 

@@ -4,11 +4,11 @@ use std::{
 };
 
 use crate::{
-    TaskId,
     sync_model::{
         BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, ProcessSyncInitEvent,
         SyncEvent, SyncInitEvent, SyncModel, TaskProgressDependencies,
     },
+    task::TaskId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

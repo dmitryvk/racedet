@@ -3,9 +3,11 @@ use std::time::Duration;
 use racedet::{
     current_scheduler,
     driver::Driver,
-    execution_point, new_start_barrier, sync_event,
     sync_model::task_wait::{NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
-    task, with_scheduler_opt, with_start_barrier, with_task_group,
+    task::{
+        execution_point, new_start_barrier, sync_event, task, with_start_barrier, with_task_group,
+    },
+    with_scheduler_opt,
 };
 use tokio::{spawn, time::sleep};
 

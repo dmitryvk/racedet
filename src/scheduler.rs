@@ -10,7 +10,7 @@ use std::{
 use itertools::Itertools;
 
 use crate::{
-    TaskId, TaskStableId, TraceView,
+    TaskStableId, TraceView,
     full_trace::{FullTraceTaskId, TaskRef, TraceViewItem},
     replay_trace::ReplayTrace,
     scheduler::get_runnable_tasks::{
@@ -18,6 +18,7 @@ use crate::{
     },
     string_pool::{StringIdx, StringPool},
     sync_model::{BadSync, NotificationOutcome, SyncEvent, SyncInitEvent, SyncModelRegistry},
+    task::TaskId,
 };
 
 mod get_runnable_tasks;
@@ -163,7 +164,7 @@ impl Scheduler {
     pub(crate) fn register_task(&self, name: &str) -> TaskId {
         let name = self.string_pool.intern(name);
         let mut inner = self.lock();
-        let id = TaskId(NonZeroU64::new(inner.next_task_id).unwrap());
+        let id = TaskId::new(NonZeroU64::new(inner.next_task_id).unwrap());
         tracing::debug!("task {id:?} {name} registered");
         inner.next_task_id += 1;
         inner.tasks.push(Task {
@@ -180,7 +181,7 @@ impl Scheduler {
     }
 
     fn task_idx(task_id: TaskId) -> usize {
-        task_id.0.get() as usize - 1
+        task_id.get().get() as usize - 1
     }
 
     pub(crate) fn on_task_finished(&self, task_id: TaskId) {
@@ -262,7 +263,7 @@ impl Scheduler {
                          rather is {:?}.
   This might mean that an internal task concurrency is happening (e.g., join or FuturesUnordered).
   If this is the case, each spawned task must be wrapped with `task`",
-                        task.id.0, task.name, task.state
+                        task.id, task.name, task.state
                     );
                 }
             }
@@ -332,7 +333,7 @@ impl Scheduler {
                          rather is {:?}.
   This might mean that an internal task concurrency is happening (e.g., join or FuturesUnordered).
   If this is the case, each spawned task must be wrapped with `task`",
-                        task.id.0, task.name, task.state
+                        task.id, task.name, task.state
                     );
                 }
             }
@@ -666,7 +667,7 @@ impl Scheduler {
                         panic!(
                             "Internal error: task {} {} is selected to run, but its state was not \
                              Suspended, but rather is {:?}.",
-                            task.id.0, task.name, task.state
+                            task.id, task.name, task.state
                         );
                     }
                 };

@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use itertools::Itertools;
 
-use crate::{TaskId, TaskStableId};
+use crate::{TaskStableId, task::TaskId};
 
 #[derive(Debug, Clone)]
 pub struct TraceView {

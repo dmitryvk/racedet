@@ -1,8 +1,8 @@
 use std::collections::{BTreeSet, HashSet};
 
 use crate::{
-    TaskId,
     sync_model::{SyncModelRegistry, TaskProgressDependencies},
+    task::TaskId,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,7 +109,7 @@ mod tests {
     fn ready_running() {
         let sync_registry = SyncModelRegistry::new();
         let task_ids = (1..=2)
-            .map(|i| TaskId(NonZeroU64::new(i).unwrap()))
+            .map(|i| TaskId::new(NonZeroU64::new(i).unwrap()))
             .collect_vec();
         let choices = get_eligible_scheduler_choices(
             &[task_ids[0]].into_iter().collect(),
@@ -123,7 +123,7 @@ mod tests {
     fn deps_for_ready_running() {
         let mut sync_registry = SyncModelRegistry::new();
         let task_ids = (1..=4)
-            .map(|i| TaskId(NonZeroU64::new(i).unwrap()))
+            .map(|i| TaskId::new(NonZeroU64::new(i).unwrap()))
             .collect_vec();
         sync_registry
             .on_notified(
@@ -153,7 +153,7 @@ mod tests {
     fn pick_new_ready_if_no_running() {
         let mut sync_registry = SyncModelRegistry::new();
         let task_ids = (1..=4)
-            .map(|i| TaskId(NonZeroU64::new(i).unwrap()))
+            .map(|i| TaskId::new(NonZeroU64::new(i).unwrap()))
             .collect_vec();
         sync_registry
             .on_notified(
@@ -215,7 +215,7 @@ mod tests {
     fn complex_cases() {
         let mut sync_registry = SyncModelRegistry::new();
         let task_ids = (1..=7)
-            .map(|i| TaskId(NonZeroU64::new(i).unwrap()))
+            .map(|i| TaskId::new(NonZeroU64::new(i).unwrap()))
             .collect_vec();
 
         // normal tasks:
