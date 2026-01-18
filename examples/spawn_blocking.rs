@@ -3,14 +3,16 @@ use std::time::Duration;
 use racedet::{
     current_scheduler,
     driver::Driver,
-    sync_model::task_wait::{NewTaskGroup, TaskGroup, TaskWaitAnyN, TaskWaitCompleted},
+    sync_model::task_wait::{
+        NewTaskGroup, TaskGroup, TaskSpawned, TaskWaitAnyN, TaskWaitCompleted,
+    },
     task::{
         StartBarrier, Task, execution_point, execution_point_blocking, sync_event, task,
         task_blocking,
     },
     with_scheduler_blocking_opt,
 };
-use tokio::{task::spawn_blocking, time::sleep};
+use tokio::task::spawn_blocking;
 
 #[tokio::main]
 async fn main() {
@@ -72,8 +74,8 @@ async fn bar() {
             })
         }
     });
-    // TODO: sleep is a hack to ensure that spawn happens before the task becomes blocked
-    sleep(Duration::from_millis(1)).await;
+    sync_event(TaskSpawned(task_group, 0));
+    sync_event(TaskSpawned(task_group, 1));
     tracing::debug!("sync_event starting join");
     sync_event(TaskWaitAnyN(task_group, 2));
     tracing::debug!("starting join");

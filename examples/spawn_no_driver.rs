@@ -1,25 +1,52 @@
-use std::time::Duration;
+use std::{panic::AssertUnwindSafe, str::FromStr, time::Duration};
 
+use futures::FutureExt;
 use racedet::{
-    driver::Driver,
+    ReplayTrace, new_scheduler,
     sync_model::task_wait::{
         NewTaskGroup, TaskGroup, TaskSpawned, TaskWaitAnyN, TaskWaitCompleted,
     },
     task::{StartBarrier, Task, execution_point, sync_event, task},
+    with_scheduler,
 };
-use tokio::spawn;
+use tokio::{spawn, time::timeout};
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    Driver::new()
-        .with_replay_many_env_var("RACE_DET_REPLAY")
-        .max_iterations_env_var("RACE_DET_ITERS", None)
-        .max_total_duration_env_var("RACE_DET_DURATION_SEC", Duration::from_secs(10))
-        .test_timeout(Duration::from_secs(1))
-        .run_async(async || foo().await)
-        .await;
+    let replay = std::env::var("RACEDET_REPLAY")
+        .ok()
+        .map(|s| ReplayTrace::from_str(&s).unwrap());
+    let (scheduler, control_fut) = new_scheduler(replay.as_ref());
+    tokio::spawn(control_fut);
+    let res = timeout(
+        Duration::from_secs(10),
+        with_scheduler(scheduler.clone(), AssertUnwindSafe(foo()).catch_unwind()),
+    )
+    .await;
+    match res {
+        Ok(Ok(res)) => {
+            println!("ok {res:?}");
+        }
+        Ok(Err(panic)) => {
+            println!(
+                "test panicked: {message}",
+                message = panic
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .unwrap_or("(non-String payload)")
+            );
+        }
+        Err(_) => {
+            println!("test timed out");
+        }
+    }
+    println!(
+        "To replay this execution, set this environment variable:\nRACEDET_REPLAY=\"{}\"",
+        scheduler.get_replay()
+    );
+    println!("{}", scheduler.get_trace());
 }
 
 async fn foo() {

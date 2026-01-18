@@ -32,6 +32,8 @@ pub struct TaskWaitModel {
 #[derive(Debug)]
 struct TaskGroupState {
     completed: HashSet<TaskGroupSlotIdx>,
+    spawned: HashSet<TaskGroupSlotIdx>,
+    started: HashSet<TaskGroupSlotIdx>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -61,6 +63,16 @@ impl DynSyncModel for TaskWaitModel {
                 let Some(task_group) = self.task_groups.get(task_group) else {
                     return TaskProgressDependencies::Blocked;
                 };
+                if task_group
+                    .spawned
+                    .iter()
+                    .any(|slot| !task_group.started.contains(slot))
+                {
+                    // waiting for spawned tasks to be started
+                    return TaskProgressDependencies::Ready {
+                        need_to_run: HashSet::new(),
+                    };
+                }
                 if task_group.completed.len() >= *num_tasks {
                     TaskProgressDependencies::Ready {
                         need_to_run: HashSet::new(),
@@ -90,6 +102,8 @@ impl DynSyncModel for TaskWaitModel {
 
 pub struct NewTaskGroup(pub TaskGroup);
 pub struct FreeTaskGroup(pub TaskGroup);
+pub struct TaskSpawned(pub TaskGroup, pub usize);
+pub struct TaskStarted(pub TaskGroup, pub usize);
 pub struct TaskCompleted(pub TaskGroup, pub usize);
 pub struct TaskWaitAnyN(pub TaskGroup, pub usize);
 pub struct TaskWaitNth(pub TaskGroup, pub usize);
@@ -102,6 +116,12 @@ impl SyncInitEvent for NewTaskGroup {
     type Model = TaskWaitModel;
 }
 impl SyncEvent for FreeTaskGroup {
+    type Model = TaskWaitModel;
+}
+impl SyncEvent for TaskSpawned {
+    type Model = TaskWaitModel;
+}
+impl SyncEvent for TaskStarted {
     type Model = TaskWaitModel;
 }
 impl SyncEvent for TaskCompleted {
@@ -127,6 +147,8 @@ impl ProcessSyncEvent<NewTaskGroup> for TaskWaitModel {
             task_group,
             TaskGroupState {
                 completed: HashSet::new(),
+                spawned: HashSet::new(),
+                started: HashSet::new(),
             },
         );
         tracing::debug!(
@@ -145,6 +167,8 @@ impl ProcessSyncInitEvent<NewTaskGroup> for TaskWaitModel {
             task_group,
             TaskGroupState {
                 completed: HashSet::new(),
+                spawned: HashSet::new(),
+                started: HashSet::new(),
             },
         );
         tracing::debug!("registered task group {task_group:?}, new state: {self:?}");
@@ -161,6 +185,35 @@ impl ProcessSyncEvent<FreeTaskGroup> for TaskWaitModel {
         self.task_groups.remove(&task_group);
         tracing::debug!("task {task_id:?} removed task group {task_group:?}, new state: {self:?}");
         Ok(NotificationOutcome::Acknowledged)
+    }
+}
+
+impl ProcessSyncEvent<TaskSpawned> for TaskWaitModel {
+    fn on_event(
+        &mut self,
+        task_id: TaskId,
+        TaskSpawned(task_group, slot_idx): TaskSpawned,
+    ) -> Result<NotificationOutcome, BadSync> {
+        if let Some(task_group) = self.task_groups.get_mut(&task_group) {
+            task_group.spawned.insert(TaskGroupSlotIdx(slot_idx));
+        }
+        tracing::debug!("task {task_id:?} spawned {task_group:?} {slot_idx}, new state: {self:?}");
+        Ok(NotificationOutcome::Acknowledged)
+    }
+}
+
+impl ProcessSyncEvent<TaskStarted> for TaskWaitModel {
+    fn on_event(
+        &mut self,
+        task_id: TaskId,
+        TaskStarted(task_group, slot_idx): TaskStarted,
+    ) -> Result<NotificationOutcome, BadSync> {
+        if let Some(task_group) = self.task_groups.get_mut(&task_group) {
+            task_group.started.insert(TaskGroupSlotIdx(slot_idx));
+        }
+        tracing::debug!("task {task_id:?} started {task_group:?} {slot_idx}, new state: {self:?}");
+        // If a task is waiting on `TaskWaitAnyN`, it might become blocked as a result of `TaskSpawned`
+        Ok(NotificationOutcome::ScheduleRequired)
     }
 }
 
