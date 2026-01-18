@@ -36,12 +36,13 @@ async fn foo() {
         )
     );
     let result = var.load(std::sync::atomic::Ordering::Relaxed);
-    assert!(result == 1 || result == 2);
+    assert!(result == 2);
 }
 
 async fn bar(var: Arc<AtomicI64>) {
     execution_point("load").await;
     let x = var.load(std::sync::atomic::Ordering::Relaxed);
-    execution_point("store").await;
-    var.store(x + 1, std::sync::atomic::Ordering::Relaxed);
+    tracing::debug!("x={x}");
+    execution_point("add").await;
+    var.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
