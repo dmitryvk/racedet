@@ -333,6 +333,7 @@ pub(crate) mod active {
             let mut inner = self.lock();
             inner.sync_model.on_notified(task_id, event)?;
             drop(inner);
+            tracing::debug!("scheduler_notify.notify_waiters before (due to sync event)");
             self.scheduler_notify.notify_waiters();
 
             Ok(())
@@ -342,6 +343,7 @@ pub(crate) mod active {
             let mut inner = self.lock();
             inner.sync_model.on_init_event(event)?;
             drop(inner);
+            tracing::debug!("scheduler_notify.notify_waiters before (due to sync init event)");
             self.scheduler_notify.notify_waiters();
 
             Ok(())
@@ -413,6 +415,9 @@ pub(crate) mod active {
                 let mut guard = self.lock();
                 let inner = &mut *guard;
                 inner.sync_model.on_notified(task_id, event)?;
+                tracing::debug!(
+                    "scheduler_notify.notify_waiters before (due to sync event at suspend point)"
+                );
                 self.scheduler_notify.notify_waiters();
 
                 let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
