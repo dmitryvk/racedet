@@ -100,9 +100,7 @@ pub(crate) mod active {
     use crate::{
         ReplayTrace, TraceView,
         replay_trace::AttachedReplayTrace,
-        scheduler::get_runnable_tasks::{
-            NextSchedulerAction, TaskScheduleChoice, get_eligible_scheduler_choices,
-        },
+        scheduler::get_runnable_tasks::{NextSchedulerAction, get_eligible_scheduler_choices},
         string_pool::{StringIdx, StringPool},
         sync::{BadSync, NotificationOutcome, SyncEvent, SyncInitEvent, active::SyncModelRegistry},
         task::TaskId,
@@ -134,10 +132,7 @@ pub(crate) mod active {
     pub fn new_scheduler(
         replay: Option<&ReplayTrace>,
     ) -> (SchedulerHandle, impl Future<Output = ()> + use<>) {
-        let scheduler = SchedulerHandle(Scheduler::new(
-            replay,
-            TaskSelector::Random(RandomTaskSelector::new()),
-        ));
+        let scheduler = SchedulerHandle(Scheduler::new(replay));
         let control_fut = scheduler.clone().run_control_loop();
         (scheduler, control_fut)
     }
@@ -184,7 +179,6 @@ pub(crate) mod active {
     struct Inner {
         next_task_id: u64,
         next_stable_task_id: u64,
-        task_selector: TaskSelector,
         tasks: Vec<Task>,
         trace: Vec<TraceEvent>,
         sync_model: SyncModelRegistry,
@@ -241,23 +235,8 @@ pub(crate) mod active {
         point: Option<StringIdx>,
     }
 
-    pub(crate) enum TaskSelector {
-        Random(RandomTaskSelector),
-    }
-
-    pub(crate) struct RandomTaskSelector;
-
-    impl RandomTaskSelector {
-        pub(crate) fn new() -> Self {
-            Self
-        }
-    }
-
     impl Scheduler {
-        pub(crate) fn new(
-            replay: Option<&crate::parsed_replay_trace::ReplayTrace>,
-            task_selector: TaskSelector,
-        ) -> Arc<Self> {
+        pub(crate) fn new(replay: Option<&crate::parsed_replay_trace::ReplayTrace>) -> Arc<Self> {
             let string_pool = Arc::new(StringPool::new());
             let replay = replay.map(|replay| {
                 tracing::debug!("replaying {replay}");
@@ -268,7 +247,6 @@ pub(crate) mod active {
                 inner: Mutex::new(Inner {
                     next_task_id: 1,
                     next_stable_task_id: 1,
-                    task_selector,
                     tasks: Vec::new(),
                     trace: Vec::new(),
                     sync_model: SyncModelRegistry::new(),
@@ -673,9 +651,7 @@ pub(crate) mod active {
                         TaskState::Suspended { .. } => {
                             suspended_tasks.insert(task.id);
                         }
-                        TaskState::Finished => {
-                            // TODO: this state are unnecessary
-                        }
+                        TaskState::Finished => {}
                     }
                 }
 
@@ -790,7 +766,8 @@ pub(crate) mod active {
                         replay.next_step += 1;
                         task_choice
                     } else {
-                        inner.task_selector.choose_next_running_task(&choices)
+                        let idx = rand::random_range(0..choices.len());
+                        &choices[idx]
                     };
 
                     tracing::debug!(
@@ -867,29 +844,6 @@ pub(crate) mod active {
     impl Drop for CurrentSchedulerGuard {
         fn drop(&mut self) {
             CURRENT_SCHEDULER.replace(self.old_value.take());
-        }
-    }
-
-    impl TaskSelector {
-        fn choose_next_running_task<'a>(
-            &mut self,
-            task_choices: &'a [TaskScheduleChoice],
-        ) -> &'a TaskScheduleChoice {
-            match self {
-                TaskSelector::Random(random_task_selector) => {
-                    random_task_selector.choose_next_running_task(task_choices)
-                }
-            }
-        }
-    }
-
-    impl RandomTaskSelector {
-        fn choose_next_running_task<'a>(
-            &mut self,
-            task_choices: &'a [TaskScheduleChoice],
-        ) -> &'a TaskScheduleChoice {
-            let idx = rand::random_range(0..task_choices.len());
-            &task_choices[idx]
         }
     }
 }
