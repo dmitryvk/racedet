@@ -68,7 +68,7 @@ pub enum TaskProgressDependencies {
     /// `Ready` may specify `Blocked` task in `need_to_run`. E.g., a task inside of `tokio::join` will specify the parent as `need_to_run` while parent will be `Blocked`
     Ready { need_to_run: HashSet<TaskId> },
     /// The task is blocked on a synchronization primitive and cannot proceed yet (i.e., it will not reach its next suspension point).
-    /// If the task is suspended, it will not be selected for resumption unless other task requires it.
+    /// If the task is ready, it will not be selected for resumption unless other task requires it.
     /// If all running tasks are `Blocked`, the scheduler will add additional `Ready` tasks.
     /// If all tasks are `Blocked`, there is either a deadlock (if external tasks are impossible) or just not enough tasks are started (if external tasks are impossible).
     /// Examples:

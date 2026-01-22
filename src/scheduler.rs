@@ -202,7 +202,7 @@ pub(crate) mod active {
     #[derive(Debug)]
     enum TaskState {
         // The task is ready to be executed (at suspension point)
-        Suspended { point: StringIdx },
+        Ready { point: StringIdx },
         // The task is currently running.
         // There can be more than one running task in case a task becomes blocked while it was running
         Running,
@@ -220,12 +220,12 @@ pub(crate) mod active {
         AutoResumedTasks {
             resumed_tasks: Vec<TaskId>,
             running_tasks: Vec<TraceTaskSnapshot>,
-            suspended_tasks: Vec<TraceTaskSnapshot>,
+            ready_tasks: Vec<TraceTaskSnapshot>,
         },
         ScheduleDecision {
             resumed_tasks: Vec<TaskId>,
             running_tasks: Vec<TraceTaskSnapshot>,
-            suspended_tasks: Vec<TraceTaskSnapshot>,
+            ready_tasks: Vec<TraceTaskSnapshot>,
             options: Vec<Vec<TaskId>>,
         },
     }
@@ -382,7 +382,7 @@ pub(crate) mod active {
                             });
                         }
                     }
-                    TaskState::Suspended { .. } | TaskState::Finished => {
+                    TaskState::Ready { .. } | TaskState::Finished => {
                         panic!(
                             "task {} {} reached point {name}, but its state is not Running, but \
                              rather is {:?}.
@@ -392,7 +392,7 @@ pub(crate) mod active {
                         );
                     }
                 }
-                task.state = TaskState::Suspended { point: name };
+                task.state = TaskState::Ready { point: name };
                 drop(guard);
             }
             tracing::debug!(
@@ -453,7 +453,7 @@ pub(crate) mod active {
                             });
                         }
                     }
-                    TaskState::Suspended { .. } | TaskState::Finished => {
+                    TaskState::Ready { .. } | TaskState::Finished => {
                         panic!(
                             "task {} {} reached point {name}, but its state is not Running, but \
                              rather is {:?}.
@@ -463,7 +463,7 @@ pub(crate) mod active {
                         );
                     }
                 }
-                task.state = TaskState::Suspended { point: name };
+                task.state = TaskState::Ready { point: name };
                 drop(guard);
             }
             tracing::debug!(
@@ -517,7 +517,7 @@ pub(crate) mod active {
                         TraceEvent::AutoResumedTasks {
                             resumed_tasks,
                             running_tasks,
-                            suspended_tasks,
+                            ready_tasks,
                         } => TraceViewItem::AutoResumedTasks {
                             resumed_tasks: resumed_tasks
                                 .iter()
@@ -527,7 +527,7 @@ pub(crate) mod active {
                                 .iter()
                                 .map(|task_snapshot| self.make_task_snapshot(&inner, task_snapshot))
                                 .collect(),
-                            suspended_tasks: suspended_tasks
+                            ready_tasks: ready_tasks
                                 .iter()
                                 .map(|task_snapshot| self.make_task_snapshot(&inner, task_snapshot))
                                 .collect(),
@@ -535,7 +535,7 @@ pub(crate) mod active {
                         TraceEvent::ScheduleDecision {
                             resumed_tasks,
                             running_tasks,
-                            suspended_tasks,
+                            ready_tasks,
                             options,
                         } => TraceViewItem::ScheduleDecision {
                             resumed_tasks: resumed_tasks
@@ -546,7 +546,7 @@ pub(crate) mod active {
                                 .iter()
                                 .map(|task_snapshot| self.make_task_snapshot(&inner, task_snapshot))
                                 .collect(),
-                            suspended_tasks: suspended_tasks
+                            ready_tasks: ready_tasks
                                 .iter()
                                 .map(|task_snapshot| self.make_task_snapshot(&inner, task_snapshot))
                                 .collect(),
@@ -642,20 +642,20 @@ pub(crate) mod active {
 
             let task_choices = {
                 let mut running_tasks = HashSet::new();
-                let mut suspended_tasks = HashSet::new();
+                let mut ready_tasks = HashSet::new();
                 for task in &inner.tasks {
                     match &task.state {
                         TaskState::Running => {
                             running_tasks.insert(task.id);
                         }
-                        TaskState::Suspended { .. } => {
-                            suspended_tasks.insert(task.id);
+                        TaskState::Ready { .. } => {
+                            ready_tasks.insert(task.id);
                         }
                         TaskState::Finished => {}
                     }
                 }
 
-                get_eligible_scheduler_choices(&running_tasks, &suspended_tasks, &inner.sync_model)
+                get_eligible_scheduler_choices(&running_tasks, &ready_tasks, &inner.sync_model)
             };
             tracing::debug!("scheduler choices: {task_choices:?}");
             match task_choices {
@@ -663,12 +663,12 @@ pub(crate) mod active {
                     if tasks.is_empty() {
                         tracing::debug!("no ready tasks!");
                     } else {
-                        let (running_tasks, suspended_tasks) = Self::trace_task_snapshots(inner);
                         if inner.error.is_none() {
+                            let (running_tasks, ready_tasks) = Self::trace_task_snapshots(inner);
                             inner.trace.push(TraceEvent::AutoResumedTasks {
                                 resumed_tasks: tasks.iter().copied().collect(),
                                 running_tasks,
-                                suspended_tasks,
+                                ready_tasks,
                             });
                         }
                         self.resume_tasks(inner, &tasks);
@@ -683,7 +683,7 @@ pub(crate) mod active {
                         let mut new_tasks = inner
                         .tasks
                         .iter_mut()
-                        .filter(|task| matches!(&task.state, TaskState::Suspended { .. } if task.stable_id.is_none()))
+                        .filter(|task| matches!(&task.state, TaskState::Ready { .. } if task.stable_id.is_none()))
                         .peekable();
                         if new_tasks.peek().is_some() {
                             let mut new_tasks: Vec<&mut Task> = new_tasks.collect();
@@ -702,12 +702,12 @@ pub(crate) mod active {
                     }
 
                     let task_choice = if let Some(replay) = &mut inner.replay {
-                        let suspended_tasks = inner
+                        let ready_tasks = inner
                             .tasks
                             .iter()
                             .filter_map(|task| match &task.state {
-                                TaskState::Suspended { point } => Some((
-                                    task.stable_id.expect("suspended tasks have stable id"),
+                                TaskState::Ready { point } => Some((
+                                    task.stable_id.expect("ready tasks have stable id"),
                                     task.name,
                                     *point,
                                 )),
@@ -716,7 +716,7 @@ pub(crate) mod active {
                             .collect::<HashSet<_>>();
                         let resumed_tasks = match replay
                             .trace
-                            .get_resumed_tasks(replay.next_step, &suspended_tasks)
+                            .get_resumed_tasks(replay.next_step, &ready_tasks)
                         {
                             Ok(tasks) => tasks,
                             Err(err) => {
@@ -741,7 +741,7 @@ pub(crate) mod active {
                                     .map(|id| {
                                         inner.tasks[Self::task_idx(*id)]
                                             .stable_id
-                                            .expect("suspended task has stable id")
+                                            .expect("ready task has stable id")
                                     })
                                     .collect::<HashSet<_>>()
                                     == HashSet::from_iter(resumed_tasks.iter().copied())
@@ -774,12 +774,12 @@ pub(crate) mod active {
                         "chose {task_choice:?} out of {} options: {choices:?}",
                         choices.len()
                     );
-                    let (running_tasks, suspended_tasks) = Self::trace_task_snapshots(inner);
+                    let (running_tasks, ready_tasks) = Self::trace_task_snapshots(inner);
                     if inner.error.is_none() {
                         inner.trace.push(TraceEvent::ScheduleDecision {
                             resumed_tasks: task_choice.to_run.iter().copied().collect(),
                             running_tasks,
-                            suspended_tasks,
+                            ready_tasks,
                             options: choices
                                 .iter()
                                 .map(|choice| choice.to_run.iter().copied().collect())
@@ -800,11 +800,11 @@ pub(crate) mod active {
                     let task = inner.tasks.get_mut(Self::task_idx(*task_id)).unwrap();
                     task.prev_suspend_point =
                         match mem::replace(&mut task.state, TaskState::Running) {
-                            TaskState::Suspended { point } => Some(point),
+                            TaskState::Ready { point } => Some(point),
                             TaskState::Running | TaskState::Finished => {
                                 panic!(
                                     "Internal error: task {} {} is selected to run, but its state \
-                                     was not Suspended, but rather is {:?}.",
+                                     was not Ready, but rather is {:?}.",
                                     task.id, task.name, task.state
                                 );
                             }
@@ -818,22 +818,22 @@ pub(crate) mod active {
 
         fn trace_task_snapshots(inner: &Inner) -> (Vec<TraceTaskSnapshot>, Vec<TraceTaskSnapshot>) {
             let mut running_tasks = Vec::new();
-            let mut suspended_tasks = Vec::new();
+            let mut ready_tasks = Vec::new();
             for task in &inner.tasks {
                 let snapshot = TraceTaskSnapshot {
                     task_id: task.id,
                     point: match &task.state {
-                        TaskState::Suspended { point } => Some(*point),
+                        TaskState::Ready { point } => Some(*point),
                         TaskState::Running | TaskState::Finished => task.prev_suspend_point,
                     },
                 };
                 match &task.state {
-                    TaskState::Suspended { .. } => suspended_tasks.push(snapshot),
+                    TaskState::Ready { .. } => ready_tasks.push(snapshot),
                     TaskState::Running => running_tasks.push(snapshot),
                     TaskState::Finished => {}
                 }
             }
-            (running_tasks, suspended_tasks)
+            (running_tasks, ready_tasks)
         }
     }
 

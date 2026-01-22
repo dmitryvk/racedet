@@ -15,12 +15,12 @@ pub(crate) struct AttachedReplayTrace {
 
 #[derive(Debug, Clone)]
 struct ReplayStep {
-    suspended_tasks: Vec<SuspendedTask>,
+    ready_tasks: Vec<ReadyTask>,
     resumed_tasks: Vec<TaskStableId>,
 }
 
 #[derive(Debug, Clone)]
-struct SuspendedTask {
+struct ReadyTask {
     id: TaskStableId,
     name: StringIdx,
     position: StringIdx,
@@ -37,10 +37,10 @@ impl AttachedReplayTrace {
             .steps
             .iter()
             .map(|s| ReplayStep {
-                suspended_tasks: s
-                    .suspended_tasks
+                ready_tasks: s
+                    .ready_tasks
                     .iter()
-                    .map(|t| SuspendedTask {
+                    .map(|t| ReadyTask {
                         id: t.id,
                         name: string_ids[t.name as usize - 1],
                         position: string_ids[t.position as usize - 1],
@@ -61,10 +61,10 @@ impl AttachedReplayTrace {
             .steps
             .iter()
             .map(|s| crate::parsed_replay_trace::ReplayStep {
-                suspended_tasks: s
-                    .suspended_tasks
+                ready_tasks: s
+                    .ready_tasks
                     .iter()
-                    .map(|t| crate::parsed_replay_trace::SuspendedTask {
+                    .map(|t| crate::parsed_replay_trace::ReadyTask {
                         id: t.id,
                         name: new_string_pool
                             .intern(
@@ -110,23 +110,20 @@ impl AttachedReplayTrace {
         let TraceViewItem::ScheduleDecision {
             resumed_tasks,
             running_tasks: _,
-            suspended_tasks,
+            ready_tasks,
             options: _,
         } = item
         else {
             return None;
         };
         let step = ReplayStep {
-            suspended_tasks: suspended_tasks
+            ready_tasks: ready_tasks
                 .iter()
-                .map(|task| SuspendedTask {
-                    id: task.id.stable_id().expect("suspended tasks have stable id"),
+                .map(|task| ReadyTask {
+                    id: task.id.stable_id().expect("ready tasks have stable id"),
                     name: strings.intern(&task.name),
-                    position: strings.intern(
-                        task.position
-                            .as_ref()
-                            .expect("suspended tasks have position"),
-                    ),
+                    position: strings
+                        .intern(task.position.as_ref().expect("ready tasks have position")),
                 })
                 .collect(),
             resumed_tasks: resumed_tasks
@@ -140,21 +137,21 @@ impl AttachedReplayTrace {
     pub(crate) fn get_resumed_tasks(
         &self,
         step_idx: usize,
-        suspended_tasks: &HashSet<(TaskStableId, StringIdx, StringIdx)>,
+        ready_tasks: &HashSet<(TaskStableId, StringIdx, StringIdx)>,
     ) -> Result<&[TaskStableId], String> {
         let step = self
             .steps
             .get(step_idx)
             .ok_or_else(|| "no more steps".to_owned())?;
         tracing::debug!("step={step:?}");
-        if step.suspended_tasks.len() != suspended_tasks.len()
+        if step.ready_tasks.len() != ready_tasks.len()
             || !step
-                .suspended_tasks
+                .ready_tasks
                 .iter()
-                .all(|task| suspended_tasks.contains(&(task.id, task.name, task.position)))
+                .all(|task| ready_tasks.contains(&(task.id, task.name, task.position)))
         {
             let mut expected = step
-                .suspended_tasks
+                .ready_tasks
                 .iter()
                 .map(|task| {
                     (
@@ -168,7 +165,7 @@ impl AttachedReplayTrace {
                     )
                 })
                 .collect::<Vec<_>>();
-            let mut actual = suspended_tasks
+            let mut actual = ready_tasks
                 .iter()
                 .map(|(id, name, position)| {
                     (
@@ -186,7 +183,7 @@ impl AttachedReplayTrace {
             actual.sort();
             tracing::error!("replay diverged: expected {expected:?}, got {actual:?}");
             Err(format!(
-                "replay diverged: suspended tasks don't match: expected {expected:?}, got \
+                "replay diverged: ready tasks don't match: expected {expected:?}, got \
                  {actual:?}"
             ))
         } else {

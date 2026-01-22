@@ -12,12 +12,12 @@ pub struct ReplayTrace {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ReplayStep {
-    pub(crate) suspended_tasks: Vec<SuspendedTask>,
+    pub(crate) ready_tasks: Vec<ReadyTask>,
     pub(crate) resumed_tasks: Vec<TaskStableId>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SuspendedTask {
+pub(crate) struct ReadyTask {
     pub(crate) id: TaskStableId,
     pub(crate) name: u32,
     pub(crate) position: u32,
@@ -32,9 +32,9 @@ impl std::fmt::Display for ReplayTrace {
             }
             write!(
                 f,
-                "{suspended}/{resumed}",
-                suspended = step
-                    .suspended_tasks
+                "{ready}/{resumed}",
+                ready = step
+                    .ready_tasks
                     .iter()
                     .map(|task| format!(
                         "{id}-{name}-{position}",
@@ -97,10 +97,10 @@ impl FromStr for ReplayTrace {
 impl FromStr for ReplayStep {
     type Err = ReplayTraceParseError;
     fn from_str(s: &str) -> Result<Self, ReplayTraceParseError> {
-        let (s_suspended, s_resumed) = s.split_once('/').ok_or(ReplayTraceParseError("no /"))?;
-        let mut suspended = Vec::new();
+        let (s_ready, s_resumed) = s.split_once('/').ok_or(ReplayTraceParseError("no /"))?;
+        let mut ready = Vec::new();
         let mut resumed = Vec::new();
-        for task in s_suspended.split(',') {
+        for task in s_ready.split(',') {
             let [s_id, s_name, s_position] = task
                 .split('-')
                 .collect_array()
@@ -113,7 +113,7 @@ impl FromStr for ReplayStep {
                 u32::from_str(s_name).map_err(|_| ReplayTraceParseError("parse task name"))?;
             let position = u32::from_str(s_position)
                 .map_err(|_| ReplayTraceParseError("parse task position"))?;
-            suspended.push(SuspendedTask { id, name, position })
+            ready.push(ReadyTask { id, name, position })
         }
         for task in s_resumed.split(',') {
             let task_id = TaskStableId(
@@ -124,7 +124,7 @@ impl FromStr for ReplayStep {
         }
 
         Ok(Self {
-            suspended_tasks: suspended,
+            ready_tasks: ready,
             resumed_tasks: resumed,
         })
     }

@@ -29,12 +29,12 @@ pub(crate) enum TraceViewItem {
     AutoResumedTasks {
         resumed_tasks: BTreeSet<TaskRef>,
         running_tasks: BTreeSet<TaskSnapshot>,
-        suspended_tasks: BTreeSet<TaskSnapshot>,
+        ready_tasks: BTreeSet<TaskSnapshot>,
     },
     ScheduleDecision {
         resumed_tasks: BTreeSet<TaskRef>,
         running_tasks: BTreeSet<TaskSnapshot>,
-        suspended_tasks: BTreeSet<TaskSnapshot>,
+        ready_tasks: BTreeSet<TaskSnapshot>,
         options: Vec<BTreeSet<TaskRef>>,
     },
 }
@@ -79,27 +79,27 @@ impl std::fmt::Display for TraceViewItem {
             TraceViewItem::AutoResumedTasks {
                 resumed_tasks,
                 running_tasks,
-                suspended_tasks,
+                ready_tasks,
             } => write!(
                 f,
-                "auto-resumed [{resumed_tasks}] (run: [{running_tasks}], suspended: \
-                 [{suspended_tasks}])",
+                "auto-resumed [{resumed_tasks}] (run: [{running_tasks}], ready: \
+                 [{ready_tasks}])",
                 resumed_tasks = resumed_tasks.iter().map(ToString::to_string).join(", "),
                 running_tasks = running_tasks.iter().map(ToString::to_string).join(", "),
-                suspended_tasks = suspended_tasks.iter().map(ToString::to_string).join(", "),
+                ready_tasks = ready_tasks.iter().map(ToString::to_string).join(", "),
             ),
             TraceViewItem::ScheduleDecision {
                 resumed_tasks,
                 running_tasks,
-                suspended_tasks,
+                ready_tasks,
                 options,
             } => write!(
                 f,
-                "resumed [{resumed_tasks}] (run: [{running_tasks}], suspended: \
-                 [{suspended_tasks}], options: [{options}])",
+                "resumed [{resumed_tasks}] (run: [{running_tasks}], ready: \
+                 [{ready_tasks}], options: [{options}])",
                 resumed_tasks = resumed_tasks.iter().map(ToString::to_string).join(", "),
                 running_tasks = running_tasks.iter().map(ToString::to_string).join(", "),
-                suspended_tasks = suspended_tasks.iter().map(ToString::to_string).join(", "),
+                ready_tasks = ready_tasks.iter().map(ToString::to_string).join(", "),
                 options = options
                     .iter()
                     .map(|option| format!(

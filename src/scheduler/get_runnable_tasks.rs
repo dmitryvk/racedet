@@ -19,7 +19,7 @@ pub(crate) enum NextSchedulerAction {
 
 pub(crate) fn get_eligible_scheduler_choices(
     running_tasks: &HashSet<TaskId>,
-    suspended_tasks: &HashSet<TaskId>,
+    ready_tasks: &HashSet<TaskId>,
     sync: &SyncModelRegistry,
 ) -> NextSchedulerAction {
     let mut has_ready = false;
@@ -46,7 +46,7 @@ pub(crate) fn get_eligible_scheduler_choices(
 
     let mut seen_task_sets = HashSet::<BTreeSet<TaskId>>::new();
     let mut choices = Vec::new();
-    for &task_id in suspended_tasks {
+    for &task_id in ready_tasks {
         match task_transitive_deps(sync, task_id) {
             TaskProgressDependencies::Ready { need_to_run } => {
                 let deps: HashSet<TaskId> = need_to_run
