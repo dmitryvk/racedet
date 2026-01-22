@@ -4,8 +4,7 @@ use std::collections::HashSet;
 
 use crate::{
     sync::{
-        BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
-        TaskProgressDependencies,
+        BadSync, DynSyncModel, ProcessSyncEvent, SyncEvent, SyncModel, TaskProgressDependencies,
     },
     task::TaskId,
 };
@@ -80,7 +79,7 @@ impl ProcessSyncEvent<LockingMutex> for MutexModel {
         &mut self,
         task_id: TaskId,
         LockingMutex(lock_id): LockingMutex,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -102,7 +101,7 @@ impl ProcessSyncEvent<LockingMutex> for MutexModel {
             }
             self.waiting.entry(task_id).or_default().insert(lock_id);
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }
 
@@ -111,7 +110,7 @@ impl ProcessSyncEvent<AbortedLockingMutex> for MutexModel {
         &mut self,
         task_id: TaskId,
         AbortedLockingMutex(lock_id): AbortedLockingMutex,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -130,7 +129,7 @@ impl ProcessSyncEvent<AbortedLockingMutex> for MutexModel {
                 self.waiting.remove(&task_id);
             }
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }
 
@@ -139,7 +138,7 @@ impl ProcessSyncEvent<LockedMutex> for MutexModel {
         &mut self,
         task_id: TaskId,
         LockedMutex(lock_id): LockedMutex,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -159,7 +158,7 @@ impl ProcessSyncEvent<LockedMutex> for MutexModel {
             }
             self.held_by.insert(lock_id, task_id);
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }
 
@@ -168,7 +167,7 @@ impl ProcessSyncEvent<ReleasedMutex> for MutexModel {
         &mut self,
         task_id: TaskId,
         ReleasedMutex(lock_id): ReleasedMutex,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -180,6 +179,6 @@ impl ProcessSyncEvent<ReleasedMutex> for MutexModel {
                 return Err(BadSync("the task was not holding the lock".to_string()));
             }
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }

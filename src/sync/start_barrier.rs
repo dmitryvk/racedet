@@ -7,8 +7,8 @@ use tokio::sync::Barrier;
 
 use crate::{
     sync::{
-        BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, ProcessSyncInitEvent,
-        SyncEvent, SyncInitEvent, SyncModel, TaskProgressDependencies,
+        BadSync, DynSyncModel, ProcessSyncEvent, ProcessSyncInitEvent, SyncEvent, SyncInitEvent,
+        SyncModel, TaskProgressDependencies,
     },
     task::TaskId,
 };
@@ -84,7 +84,7 @@ impl SyncEvent for CompletedBarrierWait {
 }
 
 impl ProcessSyncInitEvent<NewBarrier> for BarrierModel {
-    fn on_init_event(&mut self, event: NewBarrier) -> Result<NotificationOutcome, BadSync> {
+    fn on_init_event(&mut self, event: NewBarrier) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = event;
@@ -100,7 +100,7 @@ impl ProcessSyncInitEvent<NewBarrier> for BarrierModel {
                 },
             );
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }
 
@@ -109,7 +109,7 @@ impl ProcessSyncEvent<WaitingForBarrier> for BarrierModel {
         &mut self,
         task_id: TaskId,
         WaitingForBarrier(barrier_id): WaitingForBarrier,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -131,7 +131,7 @@ impl ProcessSyncEvent<WaitingForBarrier> for BarrierModel {
             }
             tracing::debug!("barriers after waiting {barrier_id:?}: {self:?}");
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }
 
@@ -140,7 +140,7 @@ impl ProcessSyncEvent<AbortedWaitingForBarrier> for BarrierModel {
         &mut self,
         task_id: TaskId,
         AbortedWaitingForBarrier(barrier_id): AbortedWaitingForBarrier,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -158,7 +158,7 @@ impl ProcessSyncEvent<AbortedWaitingForBarrier> for BarrierModel {
             }
             self.task_waiting.remove(&task_id);
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }
 
@@ -167,7 +167,7 @@ impl ProcessSyncEvent<CompletedBarrierWait> for BarrierModel {
         &mut self,
         task_id: TaskId,
         CompletedBarrierWait(barrier_id): CompletedBarrierWait,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -185,6 +185,6 @@ impl ProcessSyncEvent<CompletedBarrierWait> for BarrierModel {
             }
             self.task_waiting.remove(&task_id);
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }

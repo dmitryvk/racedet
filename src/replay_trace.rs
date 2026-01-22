@@ -183,8 +183,7 @@ impl AttachedReplayTrace {
             actual.sort();
             tracing::error!("replay diverged: expected {expected:?}, got {actual:?}");
             Err(format!(
-                "replay diverged: ready tasks don't match: expected {expected:?}, got \
-                 {actual:?}"
+                "replay diverged: ready tasks don't match: expected {expected:?}, got {actual:?}"
             ))
         } else {
             Ok(&step.resumed_tasks)

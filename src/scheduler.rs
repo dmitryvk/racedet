@@ -102,7 +102,7 @@ pub(crate) mod active {
         replay_trace::AttachedReplayTrace,
         scheduler::get_runnable_tasks::{NextSchedulerAction, get_eligible_scheduler_choices},
         string_pool::{StringIdx, StringPool},
-        sync::{BadSync, NotificationOutcome, SyncEvent, SyncInitEvent, active::SyncModelRegistry},
+        sync::{BadSync, SyncEvent, SyncInitEvent, active::SyncModelRegistry},
         task::TaskId,
         trace::{FullTraceTaskId, TaskRef, TraceViewItem},
     };
@@ -331,36 +331,18 @@ pub(crate) mod active {
             event: T,
         ) -> Result<(), BadSync> {
             let mut inner = self.lock();
-            match inner.sync_model.on_notified(task_id, event)? {
-                NotificationOutcome::Acknowledged => {
-                    // do nothing
-                }
-                NotificationOutcome::ScheduleRequired => {
-                    tracing::debug!(
-                        "scheduler_notify.notify_waiters before (due to sync event {task_id:?} \
-                         schedule required)"
-                    );
-                    self.scheduler_notify.notify_waiters();
-                }
-            }
+            inner.sync_model.on_notified(task_id, event)?;
+            drop(inner);
+            self.scheduler_notify.notify_waiters();
 
             Ok(())
         }
 
         pub(crate) fn on_sync_init_event<T: SyncInitEvent>(&self, event: T) -> Result<(), BadSync> {
             let mut inner = self.lock();
-            match inner.sync_model.on_init_event(event)? {
-                NotificationOutcome::Acknowledged => {
-                    // do nothing
-                }
-                NotificationOutcome::ScheduleRequired => {
-                    tracing::debug!(
-                        "scheduler_notify.notify_waiters before (due to sync init event schedule \
-                         required)"
-                    );
-                    self.scheduler_notify.notify_waiters();
-                }
-            }
+            inner.sync_model.on_init_event(event)?;
+            drop(inner);
+            self.scheduler_notify.notify_waiters();
 
             Ok(())
         }
@@ -430,18 +412,8 @@ pub(crate) mod active {
             {
                 let mut guard = self.lock();
                 let inner = &mut *guard;
-                match inner.sync_model.on_notified(task_id, event)? {
-                    NotificationOutcome::Acknowledged => {
-                        // do nothing
-                    }
-                    NotificationOutcome::ScheduleRequired => {
-                        tracing::debug!(
-                            "scheduler_notify.notify_waiters before (due to task {task_id:?} \
-                             reaching event ScheduleRequired before point {name})"
-                        );
-                        self.scheduler_notify.notify_waiters();
-                    }
-                }
+                inner.sync_model.on_notified(task_id, event)?;
+                self.scheduler_notify.notify_waiters();
 
                 let task = inner.tasks.get_mut(Self::task_idx(task_id)).unwrap();
                 match &task.state {

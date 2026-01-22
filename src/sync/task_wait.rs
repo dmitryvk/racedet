@@ -4,8 +4,8 @@ use std::sync::atomic::AtomicU64;
 
 use crate::{
     sync::{
-        BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, ProcessSyncInitEvent,
-        SyncEvent, SyncInitEvent, SyncModel, TaskProgressDependencies,
+        BadSync, DynSyncModel, ProcessSyncEvent, ProcessSyncInitEvent, SyncEvent, SyncInitEvent,
+        SyncModel, TaskProgressDependencies,
     },
     task::TaskId,
 };
@@ -154,7 +154,7 @@ impl ProcessSyncEvent<NewTaskGroup> for TaskWaitModel {
         &mut self,
         task_id: TaskId,
         NewTaskGroup(task_group): NewTaskGroup,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -174,15 +174,12 @@ impl ProcessSyncEvent<NewTaskGroup> for TaskWaitModel {
                 "task {task_id:?} registered task group {task_group:?}, new state: {self:?}"
             );
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }
 
 impl ProcessSyncInitEvent<NewTaskGroup> for TaskWaitModel {
-    fn on_init_event(
-        &mut self,
-        NewTaskGroup(task_group): NewTaskGroup,
-    ) -> Result<NotificationOutcome, BadSync> {
+    fn on_init_event(&mut self, NewTaskGroup(task_group): NewTaskGroup) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_group;
@@ -199,7 +196,7 @@ impl ProcessSyncInitEvent<NewTaskGroup> for TaskWaitModel {
             );
             tracing::debug!("registered task group {task_group:?}, new state: {self:?}");
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }
 
@@ -208,7 +205,7 @@ impl ProcessSyncEvent<FreeTaskGroup> for TaskWaitModel {
         &mut self,
         task_id: TaskId,
         FreeTaskGroup(task_group): FreeTaskGroup,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -221,7 +218,7 @@ impl ProcessSyncEvent<FreeTaskGroup> for TaskWaitModel {
                 "task {task_id:?} removed task group {task_group:?}, new state: {self:?}"
             );
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }
 
@@ -230,7 +227,7 @@ impl ProcessSyncEvent<TaskSpawned> for TaskWaitModel {
         &mut self,
         task_id: TaskId,
         TaskSpawned(task_group, slot_idx): TaskSpawned,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -246,7 +243,7 @@ impl ProcessSyncEvent<TaskSpawned> for TaskWaitModel {
                 "task {task_id:?} spawned {task_group:?} {slot_idx}, new state: {self:?}"
             );
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }
 
@@ -255,13 +252,12 @@ impl ProcessSyncEvent<TaskStarted> for TaskWaitModel {
         &mut self,
         task_id: TaskId,
         TaskStarted(task_group, slot_idx): TaskStarted,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
             _ = task_group;
             _ = slot_idx;
-            Ok(NotificationOutcome::Acknowledged)
         }
         #[cfg(feature = "active")]
         {
@@ -271,9 +267,8 @@ impl ProcessSyncEvent<TaskStarted> for TaskWaitModel {
             tracing::debug!(
                 "task {task_id:?} started {task_group:?} {slot_idx}, new state: {self:?}"
             );
-            // If a task is waiting on `TaskWaitAnyN`, it might become blocked as a result of `TaskSpawned`
-            Ok(NotificationOutcome::ScheduleRequired)
         }
+        Ok(())
     }
 }
 
@@ -282,7 +277,7 @@ impl ProcessSyncEvent<TaskCompleted> for TaskWaitModel {
         &mut self,
         task_id: TaskId,
         TaskCompleted(task_group, slot_idx): TaskCompleted,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -298,7 +293,7 @@ impl ProcessSyncEvent<TaskCompleted> for TaskWaitModel {
                 "task {task_id:?} completed {task_group:?} {slot_idx}, new state: {self:?}"
             );
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }
 
@@ -307,7 +302,7 @@ impl ProcessSyncEvent<TaskWaitAnyN> for TaskWaitModel {
         &mut self,
         task_id: TaskId,
         TaskWaitAnyN(task_group, num_tasks): TaskWaitAnyN,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -328,7 +323,7 @@ impl ProcessSyncEvent<TaskWaitAnyN> for TaskWaitModel {
                  state: {self:?}"
             );
         }
-        Ok(NotificationOutcome::ScheduleRequired)
+        Ok(())
     }
 }
 
@@ -337,7 +332,7 @@ impl ProcessSyncEvent<TaskWaitNth> for TaskWaitModel {
         &mut self,
         task_id: TaskId,
         TaskWaitNth(task_group, slot_idx): TaskWaitNth,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -358,16 +353,12 @@ impl ProcessSyncEvent<TaskWaitNth> for TaskWaitModel {
                  {self:?}"
             );
         }
-        Ok(NotificationOutcome::ScheduleRequired)
+        Ok(())
     }
 }
 
 impl ProcessSyncEvent<TaskWaitCompleted> for TaskWaitModel {
-    fn on_event(
-        &mut self,
-        task_id: TaskId,
-        _: TaskWaitCompleted,
-    ) -> Result<NotificationOutcome, BadSync> {
+    fn on_event(&mut self, task_id: TaskId, _: TaskWaitCompleted) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -377,6 +368,6 @@ impl ProcessSyncEvent<TaskWaitCompleted> for TaskWaitModel {
             self.task_waits.remove(&task_id);
             tracing::debug!("task wait completed for {task_id:?}, new state: {self:?}");
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }

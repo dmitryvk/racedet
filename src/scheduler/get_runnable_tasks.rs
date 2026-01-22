@@ -101,9 +101,7 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::sync::{
-        BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
-    };
+    use crate::sync::{BadSync, DynSyncModel, ProcessSyncEvent, SyncEvent, SyncModel};
 
     #[test]
     fn ready_running() {
@@ -342,9 +340,9 @@ mod tests {
             &mut self,
             task_id: TaskId,
             ProvideDeps(deps): ProvideDeps,
-        ) -> Result<NotificationOutcome, BadSync> {
+        ) -> Result<(), BadSync> {
             self.task_deps.insert(task_id, deps);
-            Ok(NotificationOutcome::Acknowledged)
+            Ok(())
         }
     }
 }

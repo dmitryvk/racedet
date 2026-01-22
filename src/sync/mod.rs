@@ -33,11 +33,11 @@ pub trait DynSyncModel: Any + Send + Sync + 'static {
 pub trait SyncModel: DynSyncModel + Default {}
 
 pub trait ProcessSyncEvent<TOp: SyncEvent>: SyncModel {
-    fn on_event(&mut self, task_id: TaskId, event: TOp) -> Result<NotificationOutcome, BadSync>;
+    fn on_event(&mut self, task_id: TaskId, event: TOp) -> Result<(), BadSync>;
 }
 
 pub trait ProcessSyncInitEvent<TOp: SyncInitEvent>: SyncModel {
-    fn on_init_event(&mut self, event: TOp) -> Result<NotificationOutcome, BadSync>;
+    fn on_init_event(&mut self, event: TOp) -> Result<(), BadSync>;
 }
 
 pub trait SyncInitEvent: Sized {
@@ -46,13 +46,6 @@ pub trait SyncInitEvent: Sized {
 
 pub trait SyncEvent: Sized {
     type Model: ProcessSyncEvent<Self>;
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum NotificationOutcome {
-    Acknowledged,
-    // A re-schedule may be required if a task becomes blocking without reaching suspension point
-    ScheduleRequired,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,8 +108,8 @@ pub(crate) mod active {
     };
 
     use super::{
-        BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, ProcessSyncInitEvent,
-        SyncEvent, SyncInitEvent, SyncModel, TaskProgressDependencies,
+        BadSync, DynSyncModel, ProcessSyncEvent, ProcessSyncInitEvent, SyncEvent, SyncInitEvent,
+        SyncModel, TaskProgressDependencies,
     };
     use crate::task::TaskId;
 
@@ -149,7 +142,7 @@ pub(crate) mod active {
             &mut self,
             task_id: TaskId,
             event: TEvent,
-        ) -> Result<NotificationOutcome, BadSync> {
+        ) -> Result<(), BadSync> {
             let sync_model = self.get_sync_model_mut::<TEvent::Model>();
             sync_model.on_event(task_id, event)
         }
@@ -157,7 +150,7 @@ pub(crate) mod active {
         pub(crate) fn on_init_event<TEvent: SyncInitEvent>(
             &mut self,
             event: TEvent,
-        ) -> Result<NotificationOutcome, BadSync> {
+        ) -> Result<(), BadSync> {
             let sync_model = self.get_sync_model_mut::<TEvent::Model>();
             sync_model.on_init_event(event)
         }
@@ -252,7 +245,7 @@ pub(crate) mod active {
                 &mut self,
                 task_id: TaskId,
                 TakingLock(lock_id): TakingLock,
-            ) -> Result<NotificationOutcome, BadSync> {
+            ) -> Result<(), BadSync> {
                 if self.locks_waiting.contains_key(&task_id) {
                     return Err(BadSync("task already waiting for a lock".to_string()));
                 }
@@ -260,7 +253,7 @@ pub(crate) mod active {
                     return Err(BadSync("the task is already holding the lock".to_string()));
                 }
                 self.locks_waiting.insert(task_id, lock_id);
-                Ok(NotificationOutcome::Acknowledged)
+                Ok(())
             }
         }
         impl ProcessSyncEvent<AbortTakingLock> for LockModel {
@@ -268,11 +261,11 @@ pub(crate) mod active {
                 &mut self,
                 task_id: TaskId,
                 AbortTakingLock(lock_id): AbortTakingLock,
-            ) -> Result<NotificationOutcome, BadSync> {
+            ) -> Result<(), BadSync> {
                 if self.locks_waiting.remove(&task_id) != Some(lock_id) {
                     return Err(BadSync("the task is not waiting for the lock".to_string()));
                 }
-                Ok(NotificationOutcome::Acknowledged)
+                Ok(())
             }
         }
         impl ProcessSyncEvent<LockTaken> for LockModel {
@@ -280,7 +273,7 @@ pub(crate) mod active {
                 &mut self,
                 task_id: TaskId,
                 LockTaken(lock_id): LockTaken,
-            ) -> Result<NotificationOutcome, BadSync> {
+            ) -> Result<(), BadSync> {
                 if self.locks_held_by.contains_key(&lock_id) {
                     return Err(BadSync("lock is already taken".to_string()));
                 }
@@ -288,7 +281,7 @@ pub(crate) mod active {
                     return Err(BadSync("task is not waiting for a lock".to_string()));
                 }
                 self.locks_held_by.insert(lock_id, task_id);
-                Ok(NotificationOutcome::Acknowledged)
+                Ok(())
             }
         }
         impl ProcessSyncEvent<LockReleased> for LockModel {
@@ -296,11 +289,11 @@ pub(crate) mod active {
                 &mut self,
                 task_id: TaskId,
                 LockReleased(lock_id): LockReleased,
-            ) -> Result<NotificationOutcome, BadSync> {
+            ) -> Result<(), BadSync> {
                 if self.locks_held_by.remove(&lock_id) != Some(task_id) {
                     return Err(BadSync("the lock was not taken by the task".to_string()));
                 }
-                Ok(NotificationOutcome::Acknowledged)
+                Ok(())
             }
         }
 
@@ -323,10 +316,7 @@ pub(crate) mod active {
                 }
             );
 
-            assert_eq!(
-                registry.on_notified(task_1, TakingLock(lock_id)).unwrap(),
-                NotificationOutcome::Acknowledged
-            );
+            registry.on_notified(task_1, TakingLock(lock_id)).unwrap();
             registry
                 .on_notified(task_1, TakingLock(LockId(2)))
                 .unwrap_err();
@@ -343,10 +333,7 @@ pub(crate) mod active {
                 }
             );
 
-            assert_eq!(
-                registry.on_notified(task_1, LockTaken(lock_id)).unwrap(),
-                NotificationOutcome::Acknowledged
-            );
+            registry.on_notified(task_1, LockTaken(lock_id)).unwrap();
             assert_eq!(
                 registry.task_progress_dependencies(task_1),
                 TaskProgressDependencies::Ready {
@@ -360,10 +347,7 @@ pub(crate) mod active {
                 }
             );
 
-            assert_eq!(
-                registry.on_notified(task_2, TakingLock(lock_id)).unwrap(),
-                NotificationOutcome::Acknowledged
-            );
+            registry.on_notified(task_2, TakingLock(lock_id)).unwrap();
             assert_eq!(
                 registry.task_progress_dependencies(task_1),
                 TaskProgressDependencies::Ready {
@@ -394,10 +378,7 @@ pub(crate) mod active {
                 },
             );
 
-            assert_eq!(
-                registry.on_notified(task_1, LockReleased(lock_id)).unwrap(),
-                NotificationOutcome::Acknowledged
-            );
+            registry.on_notified(task_1, LockReleased(lock_id)).unwrap();
             assert_eq!(
                 registry.task_progress_dependencies(task_1),
                 TaskProgressDependencies::Ready {
@@ -411,10 +392,7 @@ pub(crate) mod active {
                 },
             );
 
-            assert_eq!(
-                registry.on_notified(task_2, LockTaken(lock_id)).unwrap(),
-                NotificationOutcome::Acknowledged
-            );
+            registry.on_notified(task_2, LockTaken(lock_id)).unwrap();
             assert_eq!(
                 registry.task_progress_dependencies(task_1),
                 TaskProgressDependencies::Ready {
@@ -428,10 +406,7 @@ pub(crate) mod active {
                 },
             );
 
-            assert_eq!(
-                registry.on_notified(task_2, LockReleased(lock_id)).unwrap(),
-                NotificationOutcome::Acknowledged
-            );
+            registry.on_notified(task_2, LockReleased(lock_id)).unwrap();
             assert_eq!(
                 registry.task_progress_dependencies(task_1),
                 TaskProgressDependencies::Ready {
@@ -445,16 +420,10 @@ pub(crate) mod active {
                 },
             );
 
-            assert_eq!(
-                registry.on_notified(task_2, TakingLock(lock_id)).unwrap(),
-                NotificationOutcome::Acknowledged
-            );
-            assert_eq!(
-                registry
-                    .on_notified(task_2, AbortTakingLock(lock_id))
-                    .unwrap(),
-                NotificationOutcome::Acknowledged
-            );
+            registry.on_notified(task_2, TakingLock(lock_id)).unwrap();
+            registry
+                .on_notified(task_2, AbortTakingLock(lock_id))
+                .unwrap();
             assert_eq!(
                 registry.task_progress_dependencies(task_1),
                 TaskProgressDependencies::Ready {
@@ -468,10 +437,7 @@ pub(crate) mod active {
                 }
             );
 
-            assert_eq!(
-                registry.on_notified(task_1, TakingLock(lock_id)).unwrap(),
-                NotificationOutcome::Acknowledged
-            );
+            registry.on_notified(task_1, TakingLock(lock_id)).unwrap();
             assert_eq!(
                 registry.task_progress_dependencies(task_1),
                 TaskProgressDependencies::Ready {

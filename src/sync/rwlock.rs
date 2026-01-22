@@ -3,8 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     sync::{
-        BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
-        TaskProgressDependencies,
+        BadSync, DynSyncModel, ProcessSyncEvent, SyncEvent, SyncModel, TaskProgressDependencies,
     },
     task::TaskId,
 };
@@ -104,7 +103,7 @@ impl ProcessSyncEvent<LockingRwlock> for RwlockModel {
         &mut self,
         task_id: TaskId,
         LockingRwlock(lock_id, lock_mode): LockingRwlock,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -118,7 +117,7 @@ impl ProcessSyncEvent<LockingRwlock> for RwlockModel {
                 .or_default()
                 .insert((lock_id, lock_mode));
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }
 
@@ -127,7 +126,7 @@ impl ProcessSyncEvent<AbortedLockingRwlock> for RwlockModel {
         &mut self,
         task_id: TaskId,
         AbortedLockingRwlock(lock_id, lock_mode): AbortedLockingRwlock,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -147,7 +146,7 @@ impl ProcessSyncEvent<AbortedLockingRwlock> for RwlockModel {
                 self.waiting.remove(&task_id);
             }
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }
 
@@ -156,7 +155,7 @@ impl ProcessSyncEvent<LockedRwlock> for RwlockModel {
         &mut self,
         task_id: TaskId,
         LockedRwlock(lock_id, lock_mode): LockedRwlock,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -195,7 +194,7 @@ impl ProcessSyncEvent<LockedRwlock> for RwlockModel {
                 }
             }
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }
 
@@ -204,7 +203,7 @@ impl ProcessSyncEvent<ReleasedRwlock> for RwlockModel {
         &mut self,
         task_id: TaskId,
         ReleasedRwlock(lock_id, lock_mode): ReleasedRwlock,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -236,6 +235,6 @@ impl ProcessSyncEvent<ReleasedRwlock> for RwlockModel {
                 }
             }
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }

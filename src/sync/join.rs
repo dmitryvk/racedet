@@ -2,8 +2,7 @@ use std::collections::HashSet;
 
 use crate::{
     sync::{
-        BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
-        TaskProgressDependencies,
+        BadSync, DynSyncModel, ProcessSyncEvent, SyncEvent, SyncModel, TaskProgressDependencies,
     },
     task::TaskId,
 };
@@ -25,11 +24,7 @@ impl SyncEvent for CompletedJoin {
 }
 
 impl ProcessSyncEvent<StartingJoin> for TaskJoinModel {
-    fn on_event(
-        &mut self,
-        task_id: TaskId,
-        _event: StartingJoin,
-    ) -> Result<NotificationOutcome, BadSync> {
+    fn on_event(&mut self, task_id: TaskId, _event: StartingJoin) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -39,16 +34,12 @@ impl ProcessSyncEvent<StartingJoin> for TaskJoinModel {
             return Err(BadSync("task is already in join".to_string()));
         }
 
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }
 
 impl ProcessSyncEvent<CompletedJoin> for TaskJoinModel {
-    fn on_event(
-        &mut self,
-        task_id: TaskId,
-        _event: CompletedJoin,
-    ) -> Result<NotificationOutcome, BadSync> {
+    fn on_event(&mut self, task_id: TaskId, _event: CompletedJoin) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -58,7 +49,7 @@ impl ProcessSyncEvent<CompletedJoin> for TaskJoinModel {
             return Err(BadSync("task is not in a join".to_string()));
         }
 
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }
 

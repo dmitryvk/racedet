@@ -82,8 +82,7 @@ impl std::fmt::Display for TraceViewItem {
                 ready_tasks,
             } => write!(
                 f,
-                "auto-resumed [{resumed_tasks}] (run: [{running_tasks}], ready: \
-                 [{ready_tasks}])",
+                "auto-resumed [{resumed_tasks}] (run: [{running_tasks}], ready: [{ready_tasks}])",
                 resumed_tasks = resumed_tasks.iter().map(ToString::to_string).join(", "),
                 running_tasks = running_tasks.iter().map(ToString::to_string).join(", "),
                 ready_tasks = ready_tasks.iter().map(ToString::to_string).join(", "),
@@ -95,8 +94,8 @@ impl std::fmt::Display for TraceViewItem {
                 options,
             } => write!(
                 f,
-                "resumed [{resumed_tasks}] (run: [{running_tasks}], ready: \
-                 [{ready_tasks}], options: [{options}])",
+                "resumed [{resumed_tasks}] (run: [{running_tasks}], ready: [{ready_tasks}], \
+                 options: [{options}])",
                 resumed_tasks = resumed_tasks.iter().map(ToString::to_string).join(", "),
                 running_tasks = running_tasks.iter().map(ToString::to_string).join(", "),
                 ready_tasks = ready_tasks.iter().map(ToString::to_string).join(", "),

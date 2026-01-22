@@ -3,8 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     sync::{
-        BadSync, DynSyncModel, NotificationOutcome, ProcessSyncEvent, SyncEvent, SyncModel,
-        TaskProgressDependencies,
+        BadSync, DynSyncModel, ProcessSyncEvent, SyncEvent, SyncModel, TaskProgressDependencies,
     },
     task::TaskId,
 };
@@ -86,7 +85,7 @@ impl ProcessSyncEvent<WaitingForWatchUpdate> for WatchModel {
         &mut self,
         task_id: TaskId,
         WaitingForWatchUpdate(watch_id): WaitingForWatchUpdate,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = task_id;
@@ -100,7 +99,7 @@ impl ProcessSyncEvent<WaitingForWatchUpdate> for WatchModel {
             self.tasks.insert(task_id, watch_id);
             self.waiters.entry(watch_id).or_default().insert(task_id);
         }
-        Ok(NotificationOutcome::ScheduleRequired)
+        Ok(())
     }
 }
 
@@ -109,7 +108,7 @@ impl ProcessSyncEvent<WatchNotified> for WatchModel {
         &mut self,
         _task_id: TaskId,
         WatchNotified(watch_id): WatchNotified,
-    ) -> Result<NotificationOutcome, BadSync> {
+    ) -> Result<(), BadSync> {
         #[cfg(not(feature = "active"))]
         {
             _ = watch_id;
@@ -123,6 +122,6 @@ impl ProcessSyncEvent<WatchNotified> for WatchModel {
                 }
             }
         }
-        Ok(NotificationOutcome::Acknowledged)
+        Ok(())
     }
 }
