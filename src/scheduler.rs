@@ -5,7 +5,7 @@ use std::sync::Arc;
 pub use active::new_scheduler;
 
 #[cfg(feature = "active")]
-mod get_runnable_tasks;
+mod get_ready_tasks;
 
 #[derive(Clone)]
 pub struct SchedulerHandle(#[cfg(feature = "active")] pub(crate) Arc<active::Scheduler>);
@@ -84,6 +84,7 @@ pub fn with_scheduler_blocking_opt<T>(
 #[cfg(feature = "active")]
 pub(crate) mod active {
     use std::{
+        borrow::Cow,
         cell::RefCell,
         collections::HashSet,
         mem,
@@ -100,7 +101,7 @@ pub(crate) mod active {
     use crate::{
         ReplayTrace, TraceView,
         replay_trace::AttachedReplayTrace,
-        scheduler::get_runnable_tasks::{NextSchedulerAction, get_eligible_scheduler_choices},
+        scheduler::get_ready_tasks::{NextSchedulerAction, get_eligible_scheduler_choices},
         string_pool::{StringIdx, StringPool},
         sync::{BadSync, SyncEvent, SyncInitEvent, active::SyncModelRegistry},
         task::TaskId,
@@ -227,6 +228,7 @@ pub(crate) mod active {
             running_tasks: Vec<TraceTaskSnapshot>,
             ready_tasks: Vec<TraceTaskSnapshot>,
             options: Vec<Vec<TaskId>>,
+            blocked_reasons: Vec<(TaskId, Cow<'static, str>)>,
         },
     }
 
@@ -514,6 +516,7 @@ pub(crate) mod active {
                             running_tasks,
                             ready_tasks,
                             options,
+                            blocked_reasons,
                         } => TraceViewItem::ScheduleDecision {
                             resumed_tasks: resumed_tasks
                                 .iter()
@@ -534,6 +537,12 @@ pub(crate) mod active {
                                         .iter()
                                         .map(|task_id| self.make_task_ref(&inner, *task_id))
                                         .collect()
+                                })
+                                .collect(),
+                            blocked_reasons: blocked_reasons
+                                .iter()
+                                .map(|(task_id, reason)| {
+                                    (self.make_task_ref(&inner, *task_id), reason.clone())
                                 })
                                 .collect(),
                         },
@@ -617,7 +626,7 @@ pub(crate) mod active {
                     .join(", ")
             );
 
-            let task_choices = {
+            let (task_choices, blocked_reasons) = {
                 let mut running_tasks = HashSet::new();
                 let mut ready_tasks = HashSet::new();
                 for task in &inner.tasks {
@@ -634,7 +643,9 @@ pub(crate) mod active {
 
                 get_eligible_scheduler_choices(&running_tasks, &ready_tasks, &inner.sync_model)
             };
-            tracing::debug!("scheduler choices: {task_choices:?}");
+            tracing::debug!(
+                "scheduler choices: {task_choices:?}, blocked reasons: {blocked_reasons:?}"
+            );
             match task_choices {
                 NextSchedulerAction::NoChoice(tasks) => {
                     if tasks.is_empty() {
@@ -761,6 +772,7 @@ pub(crate) mod active {
                                 .iter()
                                 .map(|choice| choice.to_run.iter().copied().collect())
                                 .collect(),
+                            blocked_reasons: blocked_reasons.reasons,
                         });
                     }
 

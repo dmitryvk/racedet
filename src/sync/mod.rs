@@ -14,7 +14,7 @@
 //! `SyncEvent` implementations are backed by `SyncModel` which tracks the necessary state
 //! (e.g., which tasks are holding locks or trying to acquire them).
 
-use std::{any::Any, collections::HashSet};
+use std::{any::Any, borrow::Cow, collections::HashSet};
 
 use crate::task::TaskId;
 
@@ -69,9 +69,7 @@ pub enum TaskProgressDependencies {
     /// - tokio::watch if recheck is required (and was not updated)
     /// - tokio::join/BufferedUnordered/tokio::spawn
     /// - barrier with insufficient waiters
-    // TODO: include blocked tasks for deadlock detection
-    // TODO: include reasons for debugging
-    Blocked,
+    Blocked { reason: Option<Cow<'static, str>> },
 }
 
 impl TaskProgressDependencies {
@@ -80,13 +78,21 @@ impl TaskProgressDependencies {
             need_to_run: HashSet::new(),
         }
     }
+
     pub fn ready_with_others(need_to_run: impl IntoIterator<Item = TaskId>) -> Self {
         Self::Ready {
             need_to_run: need_to_run.into_iter().collect(),
         }
     }
+
     pub fn blocked() -> Self {
-        Self::Blocked
+        Self::Blocked { reason: None }
+    }
+
+    pub fn blocked_with_reason(reason: impl Into<Cow<'static, str>>) -> Self {
+        Self::Blocked {
+            reason: Some(reason.into()),
+        }
     }
 }
 
@@ -183,8 +189,19 @@ pub(crate) mod active {
                         t1
                     },
                 },
-                (Self::Blocked, Self::Ready { .. } | Self::Blocked)
-                | (Self::Ready { .. }, Self::Blocked) => Self::Blocked,
+                (Self::Blocked { reason }, Self::Ready { .. } | Self::Blocked { reason: None })
+                | (Self::Blocked { reason: None }, Self::Blocked { reason })
+                | (Self::Ready { .. }, Self::Blocked { reason }) => Self::Blocked { reason },
+                (
+                    Self::Blocked {
+                        reason: Some(reason_1),
+                    },
+                    Self::Blocked {
+                        reason: Some(reason_2),
+                    },
+                ) => Self::Blocked {
+                    reason: Some(format!("{reason_1}; {reason_2}").into()),
+                },
             }
         }
     }

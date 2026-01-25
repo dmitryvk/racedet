@@ -65,7 +65,7 @@ impl DynSyncModel for TaskJoinModel {
         }
         #[cfg(feature = "active")]
         if self.is_in_join.contains(&task_id) {
-            TaskProgressDependencies::Blocked
+            TaskProgressDependencies::blocked_with_reason("join")
         } else {
             TaskProgressDependencies::Ready {
                 need_to_run: HashSet::new(),

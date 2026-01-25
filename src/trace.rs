@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::{borrow::Cow, collections::BTreeSet, sync::Arc};
 
 use itertools::Itertools;
 
@@ -36,6 +36,7 @@ pub(crate) enum TraceViewItem {
         running_tasks: BTreeSet<TaskSnapshot>,
         ready_tasks: BTreeSet<TaskSnapshot>,
         options: Vec<BTreeSet<TaskRef>>,
+        blocked_reasons: Vec<(TaskRef, Cow<'static, str>)>,
     },
 }
 
@@ -92,10 +93,11 @@ impl std::fmt::Display for TraceViewItem {
                 running_tasks,
                 ready_tasks,
                 options,
+                blocked_reasons,
             } => write!(
                 f,
                 "resumed [{resumed_tasks}] (run: [{running_tasks}], ready: [{ready_tasks}], \
-                 options: [{options}])",
+                 options: [{options}], blocked: [{blocked_reasons}])",
                 resumed_tasks = resumed_tasks.iter().map(ToString::to_string).join(", "),
                 running_tasks = running_tasks.iter().map(ToString::to_string).join(", "),
                 ready_tasks = ready_tasks.iter().map(ToString::to_string).join(", "),
@@ -105,6 +107,10 @@ impl std::fmt::Display for TraceViewItem {
                         "[{}]",
                         option.iter().map(ToString::to_string).join(", ")
                     ))
+                    .join(", "),
+                blocked_reasons = blocked_reasons
+                    .iter()
+                    .map(|(task_id, reason)| format!("{task_id}: {reason}"))
                     .join(", "),
             ),
         }

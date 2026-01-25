@@ -1,4 +1,7 @@
-use std::collections::{BTreeSet, HashSet};
+use std::{
+    borrow::Cow,
+    collections::{BTreeSet, HashSet},
+};
 
 use crate::{
     sync::{TaskProgressDependencies, active::SyncModelRegistry},
@@ -17,13 +20,19 @@ pub(crate) enum NextSchedulerAction {
     Choices(Vec<TaskScheduleChoice>),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BlockedTaskReasons {
+    pub(crate) reasons: Vec<(TaskId, Cow<'static, str>)>,
+}
+
 pub(crate) fn get_eligible_scheduler_choices(
     running_tasks: &HashSet<TaskId>,
     ready_tasks: &HashSet<TaskId>,
     sync: &SyncModelRegistry,
-) -> NextSchedulerAction {
+) -> (NextSchedulerAction, BlockedTaskReasons) {
     let mut has_ready = false;
     let mut need_to_run = HashSet::new();
+    let mut blocked_reasons = Vec::new();
     for task_id in running_tasks {
         match task_transitive_deps(sync, *task_id) {
             TaskProgressDependencies::Ready {
@@ -36,12 +45,21 @@ pub(crate) fn get_eligible_scheduler_choices(
                         .filter(|task_id| !running_tasks.contains(task_id)),
                 );
             }
-            TaskProgressDependencies::Blocked => {}
+            TaskProgressDependencies::Blocked { reason } => {
+                if let Some(reason) = reason {
+                    blocked_reasons.push((*task_id, reason));
+                }
+            }
         }
     }
 
     if has_ready {
-        return NextSchedulerAction::NoChoice(need_to_run);
+        return (
+            NextSchedulerAction::NoChoice(need_to_run),
+            BlockedTaskReasons {
+                reasons: blocked_reasons,
+            },
+        );
     }
 
     let mut seen_task_sets = HashSet::<BTreeSet<TaskId>>::new();
@@ -60,11 +78,20 @@ pub(crate) fn get_eligible_scheduler_choices(
                     });
                 }
             }
-            TaskProgressDependencies::Blocked => {}
+            TaskProgressDependencies::Blocked { reason } => {
+                if let Some(reason) = reason {
+                    blocked_reasons.push((task_id, reason));
+                }
+            }
         }
     }
 
-    NextSchedulerAction::Choices(choices)
+    (
+        NextSchedulerAction::Choices(choices),
+        BlockedTaskReasons {
+            reasons: blocked_reasons,
+        },
+    )
 }
 
 fn task_transitive_deps(sync: &SyncModelRegistry, task_id: TaskId) -> TaskProgressDependencies {
@@ -83,14 +110,16 @@ fn task_transitive_deps(sync: &SyncModelRegistry, task_id: TaskId) -> TaskProgre
                             }
                         }
                     }
-                    TaskProgressDependencies::Blocked => {}
+                    TaskProgressDependencies::Blocked { .. } => {}
                 }
             }
             TaskProgressDependencies::Ready {
                 need_to_run: visited,
             }
         }
-        TaskProgressDependencies::Blocked => TaskProgressDependencies::Blocked,
+        TaskProgressDependencies::Blocked { reason } => {
+            TaskProgressDependencies::Blocked { reason }
+        }
     }
 }
 
@@ -109,12 +138,13 @@ mod tests {
         let task_ids = (1..=2)
             .map(|i| TaskId::new(NonZeroU64::new(i).unwrap()))
             .collect_vec();
-        let choices = get_eligible_scheduler_choices(
+        let (choices, reasons) = get_eligible_scheduler_choices(
             &[task_ids[0]].into_iter().collect(),
             &[task_ids[1]].into_iter().collect(),
             &sync_registry,
         );
         assert_eq!(choices, NextSchedulerAction::NoChoice(HashSet::new()));
+        assert_eq!(reasons.reasons, []);
     }
 
     #[test]
@@ -132,9 +162,12 @@ mod tests {
             )
             .unwrap();
         sync_registry
-            .on_notified(task_ids[1], ProvideDeps(TaskProgressDependencies::Blocked))
+            .on_notified(
+                task_ids[1],
+                ProvideDeps(TaskProgressDependencies::blocked_with_reason("a reason")),
+            )
             .unwrap();
-        let choices = get_eligible_scheduler_choices(
+        let (choices, _reasons) = get_eligible_scheduler_choices(
             &[task_ids[0]].into_iter().collect(),
             &[task_ids[1], task_ids[2], task_ids[3]]
                 .into_iter()
@@ -162,9 +195,12 @@ mod tests {
             )
             .unwrap();
         sync_registry
-            .on_notified(task_ids[1], ProvideDeps(TaskProgressDependencies::Blocked))
+            .on_notified(
+                task_ids[1],
+                ProvideDeps(TaskProgressDependencies::blocked_with_reason("a reason")),
+            )
             .unwrap();
-        let choices = get_eligible_scheduler_choices(
+        let (choices, reasons) = get_eligible_scheduler_choices(
             &[].into_iter().collect(),
             &[task_ids[0], task_ids[1], task_ids[2], task_ids[3]]
                 .into_iter()
@@ -175,6 +211,7 @@ mod tests {
         let NextSchedulerAction::Choices(mut choices) = choices else {
             panic!("unexpected action: {choices:?}");
         };
+        assert_eq!(reasons.reasons, [(task_ids[1], Cow::from("a reason"))]);
 
         choices.sort_by_cached_key(|item| {
             (
@@ -238,12 +275,18 @@ mod tests {
             )
             .unwrap();
         sync_registry
-            .on_notified(task_ids[2], ProvideDeps(TaskProgressDependencies::Blocked))
+            .on_notified(
+                task_ids[2],
+                ProvideDeps(TaskProgressDependencies::blocked()),
+            )
             .unwrap();
         // wait on mutex
         // 3: blocked
         sync_registry
-            .on_notified(task_ids[3], ProvideDeps(TaskProgressDependencies::Blocked))
+            .on_notified(
+                task_ids[3],
+                ProvideDeps(TaskProgressDependencies::blocked()),
+            )
             .unwrap();
         // wait on barrier
         // 4: ready, wait for 5, 6
@@ -274,7 +317,7 @@ mod tests {
             )
             .unwrap();
 
-        let choices = get_eligible_scheduler_choices(
+        let (choices, _reasons) = get_eligible_scheduler_choices(
             &HashSet::new(),
             &task_ids.iter().copied().collect(),
             &sync_registry,

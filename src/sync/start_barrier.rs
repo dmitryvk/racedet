@@ -55,7 +55,10 @@ impl DynSyncModel for BarrierModel {
                 need_to_run: barrier.tasks.clone(),
             }
         } else {
-            TaskProgressDependencies::Blocked
+            TaskProgressDependencies::blocked_with_reason(format!(
+                "barrier {}/{}",
+                barrier.reached, barrier.capacity
+            ))
         }
     }
 }

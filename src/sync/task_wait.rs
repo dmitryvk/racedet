@@ -68,11 +68,13 @@ impl DynSyncModel for TaskWaitModel {
         {
             match self.task_waits.get(&task_id) {
                 Some(TaskWaitCondition::AnyN {
-                    task_group,
+                    task_group: task_group_id,
                     num_tasks,
                 }) => {
-                    let Some(task_group) = self.task_groups.get(task_group) else {
-                        return TaskProgressDependencies::Blocked;
+                    let Some(task_group) = self.task_groups.get(task_group_id) else {
+                        return TaskProgressDependencies::blocked_with_reason(
+                            "no task group registered",
+                        );
                     };
                     if task_group
                         .spawned
@@ -89,19 +91,24 @@ impl DynSyncModel for TaskWaitModel {
                             need_to_run: HashSet::new(),
                         }
                     } else {
-                        TaskProgressDependencies::Blocked
+                        TaskProgressDependencies::blocked_with_reason(format!(
+                            "wait {num_tasks}/{} tasks",
+                            task_group.completed.len()
+                        ))
                     }
                 }
                 Some(TaskWaitCondition::Specific { task_group, slot }) => {
                     let Some(task_group) = self.task_groups.get(task_group) else {
-                        return TaskProgressDependencies::Blocked;
+                        return TaskProgressDependencies::blocked_with_reason(
+                            "task group not registered",
+                        );
                     };
                     if task_group.completed.contains(slot) {
                         TaskProgressDependencies::Ready {
                             need_to_run: HashSet::new(),
                         }
                     } else {
-                        TaskProgressDependencies::Blocked
+                        TaskProgressDependencies::blocked_with_reason("wait task")
                     }
                 }
                 None => TaskProgressDependencies::Ready {

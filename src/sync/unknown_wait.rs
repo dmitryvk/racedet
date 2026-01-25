@@ -26,7 +26,7 @@ impl DynSyncModel for UnknownWaitModel {
         #[cfg(feature = "active")]
         {
             if self.blocked_tasks.contains(&task_id) {
-                TaskProgressDependencies::blocked()
+                TaskProgressDependencies::blocked_with_reason("unknown")
             } else {
                 TaskProgressDependencies::ready()
             }

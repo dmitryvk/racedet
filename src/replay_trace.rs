@@ -112,6 +112,7 @@ impl AttachedReplayTrace {
             running_tasks: _,
             ready_tasks,
             options: _,
+            blocked_reasons: _,
         } = item
         else {
             return None;

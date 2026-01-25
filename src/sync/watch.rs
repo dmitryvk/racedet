@@ -69,7 +69,7 @@ impl DynSyncModel for WatchModel {
         {
             if self.tasks.contains_key(&task_id) {
                 tracing::debug!("task {task_id:?} is blocked {self:?}");
-                TaskProgressDependencies::Blocked
+                TaskProgressDependencies::blocked_with_reason("watch")
             } else {
                 TaskProgressDependencies::Ready {
                     need_to_run: HashSet::new(),
