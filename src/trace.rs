@@ -36,7 +36,7 @@ pub(crate) enum TraceViewItem {
         running_tasks: BTreeSet<TaskSnapshot>,
         ready_tasks: BTreeSet<TaskSnapshot>,
         options: Vec<BTreeSet<TaskRef>>,
-        blocked_reasons: Vec<(TaskRef, Cow<'static, str>)>,
+        blocked_reasons: BTreeSet<(TaskRef, Cow<'static, str>)>,
     },
 }
 
