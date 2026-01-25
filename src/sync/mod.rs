@@ -24,6 +24,7 @@ pub mod rwlock;
 #[cfg(feature = "active")]
 pub(crate) mod start_barrier;
 pub mod task_wait;
+pub mod unknown_wait;
 pub mod watch;
 
 pub trait DynSyncModel: Any + Send + Sync + 'static {
