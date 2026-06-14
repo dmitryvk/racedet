@@ -1,0 +1,12 @@
+[package]
+name = "test-examples"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+futures = { version = "0.3.31" }
+racedet = { workspace = true, features = ["active"] }
+timeout-tracing = "0.1.2"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3.20" }
